@@ -9,7 +9,7 @@ import {
   removeAccount, setAccountStatus, resetAccountErrors, updateAccountLabel,
   isAuthenticated, probeAccount, ensureLsForAccount,
   refreshCredits, refreshAllCredits,
-  setAccountBlockedModels,
+  setAccountBlockedModels, setAccountTokens,
 } from '../auth.js';
 import { restartLsForProxy } from '../langserver.js';
 import { getLsStatus, stopLanguageServer, startLanguageServer, isLanguageServerRunning } from '../langserver.js';
@@ -391,9 +391,10 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       let account = null;
       if (autoAdd !== false) {
         account = addAccountByKey(result.apiKey, result.name || email);
-        // Store refresh token for later token refresh
+        // Persist refresh token via the setter so it survives restart and
+        // the background Firebase-renewal loop can find it.
         if (result.refreshToken) {
-          account.refreshToken = result.refreshToken;
+          setAccountTokens(account.id, { refreshToken: result.refreshToken, idToken: result.idToken });
         }
         // Persist the per-account proxy we used for login so chat requests
         // also egress through the same IP, then warm up a matching LS.
@@ -429,7 +430,9 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       let account = null;
       if (autoAdd !== false) {
         account = addAccountByKey(apiKey, name || email || provider || 'OAuth');
-        if (refreshToken) account.refreshToken = refreshToken;
+        if (refreshToken) {
+          setAccountTokens(account.id, { refreshToken, idToken });
+        }
         ensureLsForAccount(account.id)
           .then(() => probeAccount(account.id))
           .catch(e => log.warn(`OAuth auto-probe failed: ${e.message}`));
@@ -476,7 +479,10 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       const { idToken, refreshToken: newRefresh } = await refreshFirebaseToken(acct.refreshToken, proxy);
       const { apiKey } = await reRegisterWithCodeium(idToken, proxy);
       const keyChanged = apiKey && apiKey !== acct.apiKey;
-      // Update is handled by the auth module's internal reference
+      // Persist the fresh credentials back onto the account. Without this, the
+      // in-memory apiKey stays on the now-stale value until the next server
+      // restart — every subsequent request from this account will fail auth.
+      setAccountTokens(acct.id, { apiKey: apiKey || acct.apiKey, refreshToken: newRefresh || acct.refreshToken, idToken });
       return json(res, 200, { success: true, keyChanged, email: acct.email });
     } catch (err) {
       return json(res, 400, { error: err.message });

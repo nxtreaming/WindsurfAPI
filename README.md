@@ -3,6 +3,8 @@
 <p align="center">
   <a href="https://github.com/dwgx/WindsurfAPI/stargazers"><img src="https://img.shields.io/github/stars/dwgx/WindsurfAPI?style=for-the-badge&logo=github&color=f5c518" alt="Stars"></a>&nbsp;
   <a href="https://github.com/dwgx"><img src="https://img.shields.io/github/followers/dwgx?label=Follow&style=for-the-badge&logo=github&color=181717" alt="Follow"></a>
+  &nbsp;·&nbsp;
+  <a href="README.en.md">English</a>
 </p>
 
 # 严正声明：未经作者明确书面许可，严禁任何商业使用、转售、代部署或中转售卖
@@ -13,33 +15,95 @@
 
 ---
 
-把 [Windsurf](https://windsurf.com) 的 AI 模型变成标准 OpenAI API 用
+把 [Windsurf](https://windsurf.com)（原 Codeium）的 AI 模型变成**两套标准 API 同时兼容**：
 
-简单说就是在 Linux 上跑一个 Windsurf 的 Language Server 然后把它包成 `/v1/chat/completions` 接口 任何支持 OpenAI API 的客户端都能直接接
+- `POST /v1/chat/completions` — **OpenAI 兼容** 任何 OpenAI SDK 直接用
+- `POST /v1/messages` — **Anthropic 兼容** Claude Code / Cline / Cursor 直接连
 
-**107 个模型** Claude Opus/Sonnet GPT-5 Gemini DeepSeek Grok Qwen Kimi 都有 零 npm 依赖 纯 Node.js
+**107 个模型**：Claude Opus / Sonnet · GPT-5 全系 · Gemini 3.x · DeepSeek · Grok · Qwen · Kimi · GLM 等。零 npm 依赖 纯 Node.js。
 
-## 一键部署
+## 它到底在干嘛
 
-整个过程就三步 拉代码 放二进制 跑起来
+```
+     ┌─────────────┐   /v1/chat/completions   ┌────────────┐
+     │ OpenAI SDK  │ ──────────────────────→  │            │
+     │ curl / 前端 │ ←──────────────────────  │            │
+     └─────────────┘   OpenAI JSON + SSE      │ WindsurfAPI│
+                                              │ Node.js    │      ┌──────────────┐       ┌─────────────────┐
+     ┌─────────────┐   /v1/messages           │ (本服务)   │ gRPC │ Language     │ HTTPS │ Windsurf 云端   │
+     │ Claude Code │ ──────────────────────→  │            │ ───→ │ Server (LS)  │ ────→ │ server.self-    │
+     │ Cline       │ ←──────────────────────  │            │ ←─── │ (Windsurf    │ ←─── │ serve.windsurf  │
+     │ Cursor      │   Anthropic SSE          │            │      │  binary)     │       │ .com            │
+     └─────────────┘                          └────────────┘      └──────────────┘       └─────────────────┘
+                                                    ↑
+                                                账号池轮询
+                                                速率限制隔离
+                                                故障转移
+```
+
+**它做了什么**：
+1. 一个 HTTP 服务（端口 3003）同时暴露 OpenAI 和 Anthropic 两套 API
+2. 把请求翻译成 Windsurf 内部 gRPC 协议，通过本地 Language Server 发给 Windsurf 云
+3. 维护账号池，自动轮询 + 速率限制 + 故障转移
+4. 返回前把上游 Windsurf 身份剥掉，模型自称"我是 Claude Opus 4.6 由 Anthropic 开发"
+
+## Claude Code / Cline / Cursor 怎么用
+
+模型本身**不会**操作文件 — 文件操作是 IDE Agent 客户端（Claude Code / Cline 等）在本地执行的：
+
+```
+ 你 "帮我改 bug"                Claude Code                    WindsurfAPI               Windsurf Cloud
+   │                                │                               │                          │
+   │────────────────────────────→  │                               │                          │
+   │                                │  POST /v1/messages            │                          │
+   │                                │  messages + tools + system    │                          │
+   │                                │ ─────────────────────────────→│ 打包成 Cascade 请求      │
+   │                                │                               │ ──────────────────────→  │
+   │                                │                               │                          │
+   │                                │                               │               模型思考 → 返回
+   │                                │                               │               tool_use(edit_file)
+   │                                │                               │ ←──────────────────────  │
+   │                                │ ←── Anthropic SSE ────────────│                          │
+   │                                │   content_block=tool_use      │                          │
+   │                                │                               │                          │
+   │                                │ 本地执行 edit_file()          │                          │
+   │                                │ (读写本地文件)                │                          │
+   │                                │                               │                          │
+   │                                │ 带 tool_result 再发一轮       │                          │
+   │                                │ ─────────────────────────────→│ ──────────────────────→  │
+   │                                │                                             ... (循环) ...
+   │                                │                               │                          │
+   │  ← 最终答案                    │                               │                          │
+```
+
+**重点**：WindsurfAPI 只负责**传递** tool_use / tool_result，真正改文件的是客户端 CLI。
+
+## 快速开始
+
+### 一键部署
 
 ```bash
-# 1. 拉代码
 git clone https://github.com/dwgx/WindsurfAPI.git
 cd WindsurfAPI
-
-# 2. 初始化环境（自动建目录 设权限 生成配置）
-bash setup.sh
-
-# 3. 跑起来
+bash setup.sh          # 建目录 · 配权限 · 生成 .env
 node src/index.js
 ```
 
-跑起来之后打开 `http://你的IP:3003/dashboard` 就是管理后台
+Dashboard：`http://你的IP:3003/dashboard`
 
-## 手动安装
+### 一键更新
 
-不想用脚本的话自己来也很简单
+部署过之后要拉最新修复，一条命令搞定：
+
+```bash
+cd ~/WindsurfAPI && bash update.sh
+```
+
+`update.sh` 做了：`git pull` → 停 PM2 → kill 3003 端口残留 → 重启 → 健康检查。
+
+如果你用的是我们的公网实例（`skiapi.dev` 之类），不用管，我们已经推过了。
+
+### 手动安装
 
 ```bash
 git clone https://github.com/dwgx/WindsurfAPI.git
@@ -50,7 +114,6 @@ mkdir -p /opt/windsurf/data/db
 cp language_server_linux_x64 /opt/windsurf/
 chmod +x /opt/windsurf/language_server_linux_x64
 
-# 环境变量（可选 不建的话全走默认）
 cat > .env << 'EOF'
 PORT=3003
 API_KEY=
@@ -67,54 +130,37 @@ node src/index.js
 
 ## 加账号
 
-服务跑起来之后要先加 Windsurf 账号才能用
+服务跑起来之后要先加 Windsurf 账号才能用，三种方式：
 
-**方法一 Token（推荐）**
+**方式 1 Dashboard 一键登录（推荐）**
 
-去 [windsurf.com/show-auth-token](https://windsurf.com/show-auth-token) 复制你的 Token 然后
+打开 `http://你的IP:3003/dashboard` → 登录取号 → 点 **Google 登录** 或 **GitHub 登录**（OAuth 弹窗）或直接填邮箱密码。所有方式都会自动入池。
 
-```bash
-curl -X POST http://localhost:3003/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"token": "你的token贴这里"}'
-```
+**方式 2 Token（任何登录方式都能用）**
 
-**方法二 后台操作**
-
-打开 `http://你的IP:3003/dashboard` 在"登录取号"面板输入邮箱密码登录
-
-> 用 Google / GitHub 第三方登录的账号没有密码 只能用 Token 方式
-
-**方法三 批量加**
+去 [windsurf.com/show-auth-token](https://windsurf.com/show-auth-token) 复制 Token：
 
 ```bash
 curl -X POST http://localhost:3003/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"accounts": [{"token": "token1"}, {"token": "token2"}]}'
+  -d '{"token": "你的token"}'
 ```
 
-## 用法
-
-跟 OpenAI API 一模一样
+**方式 3 批量**
 
 ```bash
-# 聊天
-curl http://localhost:3003/v1/chat/completions \
+curl -X POST http://localhost:3003/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "你好"}]}'
-
-# 看有哪些模型
-curl http://localhost:3003/v1/models
-
-# 健康检查
-curl http://localhost:3003/health
+  -d '{"accounts": [{"token": "t1"}, {"token": "t2"}]}'
 ```
 
-用 Python 的话
+## 调用示例
+
+### OpenAI 格式（Python / JS / curl）
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="http://你的IP:3003/v1", api_key="随便填")
+client = OpenAI(base_url="http://你的IP:3003/v1", api_key="你设的API_KEY")
 r = client.chat.completions.create(
     model="claude-sonnet-4.6",
     messages=[{"role": "user", "content": "你好"}]
@@ -122,110 +168,98 @@ r = client.chat.completions.create(
 print(r.choices[0].message.content)
 ```
 
+### Anthropic 格式（Claude Code 直接连）
+
+```bash
+export ANTHROPIC_BASE_URL=http://你的IP:3003
+export ANTHROPIC_API_KEY=你设的API_KEY
+claude                # 正常用 Claude Code 即可
+```
+
+```bash
+# 裸 curl 测试
+curl http://localhost:3003/v1/messages \
+  -H "Authorization: Bearer 你的key" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{"model":"claude-opus-4.6","max_tokens":100,"messages":[{"role":"user","content":"你好"}]}'
+```
+
+### Cline / Cursor / Aider
+
+在客户端配置里 **Custom OpenAI Compatible**：
+- Base URL: `http://你的IP:3003/v1`
+- API Key: 你设的 API_KEY
+- Model: 任选我们支持的模型
+
 ## 环境变量
 
 | 变量 | 默认值 | 干嘛的 |
 |---|---|---|
 | `PORT` | `3003` | 服务端口 |
 | `API_KEY` | 空 | 调 API 要带的密钥 留空就不验证 |
-| `DEFAULT_MODEL` | `claude-4.5-sonnet-thinking` | 不传 model 的时候用哪个 |
+| `DEFAULT_MODEL` | `claude-4.5-sonnet-thinking` | 不传 model 用哪个 |
 | `MAX_TOKENS` | `8192` | 默认最大回复 token 数 |
-| `LOG_LEVEL` | `info` | 日志级别 debug/info/warn/error |
+| `LOG_LEVEL` | `info` | debug / info / warn / error |
 | `LS_BINARY_PATH` | `/opt/windsurf/language_server_linux_x64` | LS 二进制位置 |
 | `LS_PORT` | `42100` | LS gRPC 端口 |
 | `DASHBOARD_PASSWORD` | 空 | 后台密码 留空不设密码 |
 
+## Dashboard 功能面板
+
+打开 `http://你的IP:3003/dashboard`：
+
+| 面板 | 功能 |
+|---|---|
+| **总览** | 运行状态 · 账号池 · LS 健康 · 成功率 |
+| **登录取号** | Google / GitHub OAuth 一键登录 · 邮箱密码登录 · **测试代理** 按钮（实测出口 IP） |
+| **账号管理** | 加 / 删 / 停用 · 探测订阅等级 · 看余额 · 封禁模型黑名单 |
+| **模型控制** | 全局模型黑白名单 |
+| **代理配置** | 全局或单账号的 HTTP / SOCKS5 代理 |
+| **日志** | 实时 SSE 串流 · 按级别筛 · 每条 `turns=N chars=M` 诊断多轮 |
+| **统计分析** | 时间范围 6h / 24h / 72h · 账号维度 · p50 / p95 延迟 |
+| **实验性** | Cascade 对话复用 · **模型身份注入（每厂商可自定义 prompt）** |
+
 ## 支持的模型
 
-总共 107 个 以下是主要的 实际列表以 `/v1/models` 返回为准
+总共 107 个，以下是主要分类，实际列表以 `/v1/models` 返回为准：
 
 <details>
 <summary><b>Claude（Anthropic）</b> — 20 个</summary>
 
-| 模型 | 方案 |
-|---|---|
-| claude-3.5-sonnet / 3.7-sonnet / 3.7-sonnet-thinking | 免费 |
-| claude-4-sonnet / opus（含 thinking） | Pro |
-| claude-4.1-opus / thinking | Pro |
-| claude-4.5-haiku / sonnet / opus（含 thinking） | Pro |
-| claude-sonnet-4.6 / thinking / 1m / thinking-1m | Pro |
-| claude-opus-4.6 / thinking | Pro |
+claude-3.5-sonnet / 3.7-sonnet / thinking · claude-4-sonnet / opus / thinking · claude-4.1-opus · claude-4.5-haiku / sonnet / opus · claude-sonnet-4.6（含 1m / thinking / thinking-1m） · claude-opus-4.6 / thinking
 
 </details>
 
 <details>
 <summary><b>GPT（OpenAI）</b> — 55+ 个</summary>
 
-| 模型 | 方案 |
-|---|---|
-| gpt-4o / gpt-4o-mini | 免费（mini）/ Pro |
-| gpt-4.1 / mini / nano | Pro |
-| gpt-5 / 5-medium / 5-high / 5-mini | Pro |
-| gpt-5.1 系列（含 codex / fast 变体） | Pro |
-| gpt-5.2 系列（none / low / medium / high / xhigh + fast） | Pro |
-| gpt-5.3-codex / gpt-5.4 系列 / gpt-5.4-mini 系列 | Pro |
-| gpt-oss-120b | Pro |
-| o3 / o3-mini / o3-high / o3-pro / o4-mini | Pro |
+gpt-4o · gpt-4o-mini · gpt-4.1 / mini / nano · gpt-5 / 5-medium / 5-high / 5-mini · gpt-5.1 全系（含 codex / fast） · gpt-5.2 全系（none / low / medium / high / xhigh + fast + codex） · gpt-5.3-codex · gpt-5.4 / 5.4-mini · gpt-oss-120b · o3 / o3-mini / o3-high / o3-pro / o4-mini
 
 </details>
 
 <details>
 <summary><b>Gemini（Google）</b> — 9 个</summary>
 
-| 模型 | 方案 |
-|---|---|
-| gemini-2.5-pro / flash | 免费（flash）/ Pro |
-| gemini-3.0-pro / flash（含 minimal / low / high） | Pro |
-| gemini-3.1-pro（low / high） | Pro |
+gemini-2.5-pro / flash · gemini-3.0-pro / flash（含 minimal / low / high） · gemini-3.1-pro（low / high）
 
 </details>
 
 <details>
 <summary><b>其他</b></summary>
 
-| 模型 | 供应商 |
-|---|---|
-| deepseek-v3 / v3-2 / r1 | DeepSeek |
-| grok-3 / grok-3-mini / grok-3-mini-thinking / grok-code-fast-1 | xAI |
-| qwen-3 / qwen-3-coder | Alibaba |
-| kimi-k2 / kimi-k2.5 | Moonshot |
-| glm-4.7 / glm-5 / glm-5.1 | Zhipu |
-| minimax-m2.5 | MiniMax |
-| swe-1.5 / 1.5-fast / 1.6 / 1.6-fast | Windsurf |
-| arena-fast / arena-smart | Windsurf |
+deepseek-v3 / v3-2 / r1 · grok-3 / mini / mini-thinking / code-fast-1 · qwen-3 / 3-coder · kimi-k2 / k2.5 · glm-4.7 / 5 / 5.1 · minimax-m2.5 · swe-1.5 / 1.6（含 fast） · arena-fast / smart
 
 </details>
 
-> 免费账号只能用 `gpt-4o-mini` 和 `gemini-2.5-flash` 其他都要 Windsurf Pro
+> **免费账号**只能用 `gpt-4o-mini` 和 `gemini-2.5-flash`，其他需要 Windsurf Pro。
 
-## 管理后台
+## 架构要点
 
-打开 `http://你的IP:3003/dashboard` 长这样
-
-- **总览** 运行状态 账号池 LS 健康 成功率
-- **登录取号** 用邮箱密码登录 Windsurf 拿 API Key
-- **账号管理** 加号 删号 看状态 探测订阅等级
-- **模型控制** 全局的模型黑白名单
-- **Proxy 设定** 全局或单账号的代理
-- **日志** 实时 SSE 串流 可以按级别筛
-- **统计** 按模型按账号看请求量 延迟 成功率
-- **封禁检测** 监控账号有没有被搞
-
-设 `DASHBOARD_PASSWORD` 环境变量就能加密码保护
-
-## 架构
-
-```
-你的客户端（curl / OpenAI SDK / 任何支持 OpenAI API 的东西）
-    ↓
-WindsurfAPI（Node.js HTTP 3003）
-    ↓
-Language Server（gRPC 42100）
-    ↓
-Windsurf 云端（server.self-serve.windsurf.com）
-```
-
-零 npm 依赖 protobuf 手搓的 gRPC 走 HTTP/2 账号池自动轮询和故障转移
+- **零 npm 依赖** 全走 `node:*` 内置 · protobuf 手搓（`src/proto.js`）· 下载即跑
+- **账号池 + LS 池** 每个独立 proxy 一个 LS 实例 不混用
+- **NO_TOOL 模式** `planner_mode=3` 关掉 Cascade 内置工具循环，避免 `/tmp/windsurf-workspace/` 路径泄漏
+- **三层 sanitize** LS 内建工具结果过滤 · `<tool_call>` 文本解析 · 输出路径清洗
+- **真实 token 计量** 从 `CortexStepMetadata.model_usage` 抓 Cascade 真实 `inputTokens` / `outputTokens` / `cacheRead` / `cacheWrite`，`prompt_tokens` 含 cacheWrite
 
 ## PM2 部署
 
@@ -235,14 +269,7 @@ pm2 start src/index.js --name windsurf-api
 pm2 save && pm2 startup
 ```
 
-重启的时候别用 `pm2 restart` 会出僵尸进程 用这个
-
-```bash
-pm2 stop windsurf-api && pm2 delete windsurf-api
-fuser -k 3003/tcp 2>/dev/null
-sleep 2
-pm2 start src/index.js --name windsurf-api --cwd /root/WindsurfAPI
-```
+**不要**用 `pm2 restart`（会出僵尸进程），用一键更新脚本 `bash update.sh`。
 
 ## 防火墙
 
@@ -254,24 +281,27 @@ ufw allow 3003/tcp
 firewall-cmd --add-port=3003/tcp --permanent && firewall-cmd --reload
 ```
 
-云服务器记得去安全组开 3003
+云服务器记得去安全组开 3003。
 
 ## 常见问题
 
 **Q: 登录报"邮箱或密码错误"**
-A: 你是用 Google/GitHub 登录的 Windsurf 对吧 那种账号没有密码 去 [windsurf.com/show-auth-token](https://windsurf.com/show-auth-token) 拿 Token 用 Token 方式加
+A: 你是用 Google/GitHub 登录的 Windsurf 吧 那种账号没有密码。Dashboard 的登录取号面板现在直接支持 Google / GitHub OAuth 一键登录。
 
 **Q: 模型说"我无法操作文件系统"**
-A: 正常的 这是 chat API 不是 IDE 模型没有文件操作能力
+A: 这是 **chat API**，不是 IDE agent。要让模型真的改文件，用 **Claude Code / Cline / Cursor / Aider** 之类的客户端 CLI，把它们的 API base URL 指向本服务就行。模型出 tool_use，客户端本地执行，再把 tool_result 发回来。上面的图有详细流程。
 
-**Q: 长 prompt 超时了**
-A: 长输入需要更多处理时间 系统会根据输入长度自动调整等待时间 最长到 90 秒
+**Q: 上下文丢失 / 模型忘了前面说的**
+A: 多账号轮询**不会**丢上下文 — 每次请求都重新打包完整 history 发给 Cascade。真正的原因通常是中转层（new-api 等）没把完整 `messages[]` 透传过来。在 Dashboard 日志面板看 `turns=N`：如果多轮对话但 `turns=1`，就是中转层在你之前就把历史丢了。
+
+**Q: 长 prompt 超时**
+A: 已修。cold stall 检测按输入长度自适应，长输入最多给 90s。
 
 **Q: Claude Code 能用吗**
-A: 目前不行 Claude Code 用的是 Anthropic 自己的 API 格式 不是 OpenAI 格式 后面考虑加
+A: 能。`export ANTHROPIC_BASE_URL=http://你的API` + `export ANTHROPIC_API_KEY=你的key`。`/v1/messages` 支持 system + tools + tool_use + tool_result + stream + multi-turn 全套，已实测通过。
 
 **Q: 免费账号能用什么模型**
-A: 只有 `gpt-4o-mini` 和 `gemini-2.5-flash` 其他全要 Pro
+A: 只有 `gpt-4o-mini` 和 `gemini-2.5-flash`，其他全要 Pro。
 
 ## 授权
 

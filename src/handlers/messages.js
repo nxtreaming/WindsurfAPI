@@ -330,9 +330,23 @@ function createCaptureRes(translator) {
       listeners.get(event).push(cb);
       return this;
     },
-    once(event, cb) { return this.on(event, cb); },
-    off() { return this; },
-    removeListener() { return this; },
+    once(event, cb) {
+      const self = this;
+      const wrapped = function onceWrapper() {
+        self.off(event, wrapped);
+        cb.apply(self, arguments);
+      };
+      return self.on(event, wrapped);
+    },
+    off(event, cb) {
+      const arr = listeners.get(event);
+      if (arr) {
+        const idx = arr.indexOf(cb);
+        if (idx !== -1) arr.splice(idx, 1);
+      }
+      return this;
+    },
+    removeListener(event, cb) { return this.off(event, cb); },
     emit() { return true; },
   };
 }
