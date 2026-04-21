@@ -594,15 +594,21 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
       // In emulation mode, parsed calls are emitted as OpenAI tool_calls.
       // In non-emulation mode, blocks are silently stripped (defense-in-depth
       // against Cascade's system prompt inducing tool markup).
-      const toolParser = useCascade ? new ToolCallStreamParser() : null;
+      //
+      // These are re-created at the start of each retry attempt (before the
+      // first chunk is consumed) so stale buffers from a failed attempt —
+      // e.g. a half-read `<tool_call>` tag — can't corrupt the next
+      // account's stream. `let` bindings so the retry loop below can
+      // reassign.
+      let toolParser = useCascade ? new ToolCallStreamParser() : null;
       const collectedToolCalls = [];
 
       // Streaming path sanitizers. Every text/thinking delta flows through a
       // PathSanitizeStream before leaving the server so /tmp/windsurf-workspace,
       // /opt/windsurf and /root/WindsurfAPI literals can never slip out even
       // if a path straddles a chunk boundary. See src/sanitize.js.
-      const pathStreamText = new PathSanitizeStream();
-      const pathStreamThinking = new PathSanitizeStream();
+      let pathStreamText = new PathSanitizeStream();
+      let pathStreamThinking = new PathSanitizeStream();
 
       const emitContent = (clean) => {
         if (!clean) return;
@@ -667,6 +673,15 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
       try {
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           if (abortController.signal.aborted) return;
+          // Rebuild per-attempt stream state so a prior failure's residue
+          // (partial <tool_call>, half-scrubbed path) can't leak into the
+          // retry. Skip on attempt 0 — already fresh. hadSuccess=true
+          // means we already emitted content so no retry happens anyway.
+          if (attempt > 0 && !hadSuccess) {
+            if (useCascade) toolParser = new ToolCallStreamParser();
+            pathStreamText = new PathSanitizeStream();
+            pathStreamThinking = new PathSanitizeStream();
+          }
           let acct = null;
           if (reuseEntry && attempt === 0) {
             acct = acquireAccountByKey(reuseEntry.apiKey, modelKey);

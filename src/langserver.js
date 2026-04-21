@@ -240,13 +240,14 @@ export async function restartLsForProxy(proxy) {
 }
 
 /**
- * Get the LS entry matching a proxy (or default when proxy is null).
- * Returns the default instance as a fallback if the proxy-specific one hasn't
- * been spawned yet.
+ * Get the LS entry matching a proxy, or null if it hasn't been spawned.
+ * Callers should `await ensureLs(proxy)` first — don't silently fall back
+ * to the default LS, because that sends the request through the wrong
+ * egress IP (Codeium will see the wrong source, invalidate the session,
+ * and falsely mark the account expired).
  */
 export function getLsFor(proxy) {
-  const key = proxyKey(proxy);
-  return _pool.get(key) || _pool.get('default') || null;
+  return _pool.get(proxyKey(proxy)) || null;
 }
 
 /**

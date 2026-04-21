@@ -71,10 +71,6 @@ function createProxyTunnel(proxy, targetHost, targetPort) {
     const proxyHost = proxy.host.replace(/:\d+$/, '');
     const proxyPort = proxy.port || 8080;
 
-    const authHeader = proxy.username
-      ? `Proxy-Authorization: Basic ${Buffer.from(`${proxy.username}:${proxy.password || ''}`).toString('base64')}\r\n`
-      : '';
-
     const connectReq = http.request({
       host: proxyHost,
       port: proxyPort,
