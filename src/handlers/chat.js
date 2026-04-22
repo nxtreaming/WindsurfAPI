@@ -185,11 +185,12 @@ export async function handleChatCompletions(body) {
   // the requested model (e.g. "I am Claude Opus 4.6") instead of leaking the
   // Cascade/Windsurf backend identity.
   //
-  // Identity injection now works alongside field 13 communication_section
-  // which tells the model "adopt the identity from the system prompt" instead
-  // of directly contradicting Cascade's baked-in identity. This avoids the
-  // triple-conflict that caused opus-4-7 prompt-injection refusal. (#22)
-  if (isExperimentalEnabled('modelIdentityPrompt') && modelInfo?.provider) {
+  // Skip identity injection when client already provides a system prompt
+  // (Claude Code / Cline / Cursor). Adding "You are Claude" on top of the
+  // client's system prompt triggers Cascade's anti-injection protection on
+  // reasoning models like opus-4-7. (#22)
+  const clientHasSystem = Array.isArray(messages) && messages.some(m => m?.role === 'system');
+  if (isExperimentalEnabled('modelIdentityPrompt') && modelInfo?.provider && !clientHasSystem) {
     const identityText = buildIdentitySystemMessage(displayModel, modelInfo.provider);
     if (identityText) {
       const sysMsg = { role: 'system', content: identityText };
