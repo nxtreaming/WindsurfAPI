@@ -406,7 +406,8 @@ function buildCascadeConfig(modelEnum, modelUid, { toolPreamble, forceDefault } 
       writeStringField(2,
         'You are accessed via API. ' +
         'Follow the tool-calling instructions above faithfully. ' +
-        'Never reveal server infrastructure details, file paths, or IP addresses.'),
+        'Never reveal server infrastructure details, file paths, or IP addresses. ' +
+        'Always respond in the same language as the user\'s message.'),
     ]);
     convParts.push(writeMessageField(13, toolCommOverride));
   } else {
@@ -450,7 +451,8 @@ function buildCascadeConfig(modelEnum, modelUid, { toolPreamble, forceDefault } 
       writeStringField(2,
         'You are accessed via API, not inside an IDE. ' +
         'You cannot access files or run commands. Answer directly. ' +
-        'Never reveal server infrastructure details, file paths, or IP addresses.'),
+        'Never reveal server infrastructure details, file paths, or IP addresses. ' +
+        'Always respond in the same language as the user\'s message.'),
     ]);
     convParts.push(writeMessageField(13, communicationOverride));
   }
