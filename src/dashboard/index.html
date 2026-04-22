@@ -695,20 +695,50 @@ tbody tr:hover td { background: var(--surface-2); }
 .bar {
   width: 100%;
   min-width: 6px;
-  background: linear-gradient(to top, var(--accent), var(--accent-hover));
-  border-radius: 3px 3px 0 0;
-  transition: height .4s cubic-bezier(.4,0,.2,1);
+  background: linear-gradient(to top, #3b82f6, #60a5fa);
+  border-radius: 4px 4px 0 0;
+  transition: height .4s cubic-bezier(.4,0,.2,1), box-shadow .2s;
+  cursor: pointer;
 }
 .bar.has-errors {
-  background: linear-gradient(to top, var(--error), var(--accent));
+  background: linear-gradient(to top, #ef4444, #f97316);
 }
-.bar-wrap:hover .bar { filter: brightness(1.2); }
+.bar-wrap:hover .bar { box-shadow: 0 0 12px rgba(96,165,250,.5); transform: scaleX(1.1); }
+.bar-wrap:hover .bar.has-errors { box-shadow: 0 0 12px rgba(239,68,68,.5); }
 .bar-label {
   font-size: 9px;
   color: var(--text-dim);
   margin-top: 4px;
   font-family: var(--mono);
 }
+.bar-tooltip {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+  border: 1px solid rgba(255,255,255,.08);
+  margin-bottom: 6px;
+}
+.bar-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1a1a2e;
+}
+.bar-wrap:hover .bar-tooltip { display: block; }
 
 /* ─── Toast ───────────────────────────────────── */
 .toast-stack {
@@ -3071,7 +3101,7 @@ const App = {
       const h = Math.max(2, (b.requests / maxReq) * 100);
       const errRate = b.requests > 0 ? ((b.errors / b.requests) * 100).toFixed(0) : '0';
       const hr = new Date(b.hour).getHours();
-      return `<div class="bar-wrap"><div class="bar ${b.errors > 0 ? 'has-errors' : ''}" style="height:${h}%" title="${b.hour} · ${b.requests} 请求 · ${b.errors} 错误 (${errRate}%)"></div><div class="bar-label">${hr}时</div></div>`;
+      return `<div class="bar-wrap"><div class="bar-tooltip"><b>${hr}:00</b><br>${b.requests} 请求 · ${b.errors} 错误 (${errRate}%)</div><div class="bar ${b.errors > 0 ? 'has-errors' : ''}" style="height:${h}%"></div><div class="bar-label">${hr}时</div></div>`;
     }).join('') || '<div class="text-sm text-dim" style="text-align:center;width:100%;padding:30px">暂无数据</div>';
 
     this.poll('stats', () => this.loadStats(), 30000);
