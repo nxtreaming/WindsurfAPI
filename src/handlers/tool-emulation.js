@@ -228,7 +228,39 @@ export class ToolCallStreamParser {
     this.inToolCall = false;
     this.inToolResult = false;
     this.inToolCode = false;
+    this.inBareCall = false;
     this._totalSeen = 0;
+  }
+
+  _findClosingBrace() {
+    let depth = 0;
+    let inStr = false;
+    let escaped = false;
+    for (let i = 0; i < this.buffer.length; i++) {
+      const ch = this.buffer[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\' && inStr) { escaped = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') depth++;
+      if (ch === '}') { depth--; if (depth === 0) return i; }
+    }
+    return -1;
+  }
+
+  _consumeJsonBlock(parseFn, doneCalls, safeParts) {
+    const endIdx = this._findClosingBrace();
+    if (endIdx === -1) return false;
+    const jsonStr = this.buffer.slice(0, endIdx + 1);
+    this.buffer = this.buffer.slice(endIdx + 1);
+    const tc = parseFn(jsonStr);
+    if (tc) {
+      doneCalls.push(tc);
+      this._totalSeen++;
+    } else {
+      safeParts.push(jsonStr);
+    }
+    return true;
   }
 
   _parseToolCodeJson(jsonStr) {
@@ -248,6 +280,18 @@ export class ToolCallStreamParser {
     };
   }
 
+  _parseBareToolCallJson(jsonStr) {
+    const parsed = safeParseJson(jsonStr);
+    if (!parsed || typeof parsed.name !== 'string' || !('arguments' in parsed)) return null;
+    const args = parsed.arguments;
+    const argsJson = typeof args === 'string' ? args : JSON.stringify(args ?? {});
+    return {
+      id: `call_${this._totalSeen}_${Date.now().toString(36)}`,
+      name: parsed.name,
+      argumentsJson: argsJson,
+    };
+  }
+
   feed(delta) {
     if (!delta) return { text: '', toolCalls: [] };
     this.buffer += delta;
@@ -258,12 +302,13 @@ export class ToolCallStreamParser {
     const TR_PREFIX = '<tool_result';
     const TR_CLOSE = '</tool_result>';
     const TC_CODE = '{"tool_code"';
+    const TC_BARE = '{"name"';
 
     while (true) {
       // ── Inside a <tool_result …>…</tool_result> block — discard body ──
       if (this.inToolResult) {
         const closeIdx = this.buffer.indexOf(TR_CLOSE);
-        if (closeIdx === -1) break; // wait for close tag
+        if (closeIdx === -1) break;
         this.buffer = this.buffer.slice(closeIdx + TR_CLOSE.length);
         this.inToolResult = false;
         continue;
@@ -272,7 +317,7 @@ export class ToolCallStreamParser {
       // ── Inside a <tool_call>…</tool_call> block — parse JSON body ──
       if (this.inToolCall) {
         const closeIdx = this.buffer.indexOf(TC_CLOSE);
-        if (closeIdx === -1) break; // wait for more
+        if (closeIdx === -1) break;
         const body = this.buffer.slice(0, closeIdx).trim();
         this.buffer = this.buffer.slice(closeIdx + TC_CLOSE.length);
         this.inToolCall = false;
@@ -293,32 +338,17 @@ export class ToolCallStreamParser {
         continue;
       }
 
-      // ── Inside a {"tool_code": "…"} block — find closing brace ──
+      // ── Inside a {"tool_code": "…"} block ──
       if (this.inToolCode) {
-        let depth = 0;
-        let inStr = false;
-        let escaped = false;
-        let endIdx = -1;
-        for (let i = 0; i < this.buffer.length; i++) {
-          const ch = this.buffer[i];
-          if (escaped) { escaped = false; continue; }
-          if (ch === '\\' && inStr) { escaped = true; continue; }
-          if (ch === '"') { inStr = !inStr; continue; }
-          if (inStr) continue;
-          if (ch === '{') depth++;
-          if (ch === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
-        }
-        if (endIdx === -1) break;
-        const jsonStr = this.buffer.slice(0, endIdx + 1);
-        this.buffer = this.buffer.slice(endIdx + 1);
+        if (!this._consumeJsonBlock(s => this._parseToolCodeJson(s), doneCalls, safeParts)) break;
         this.inToolCode = false;
-        const tc = this._parseToolCodeJson(jsonStr);
-        if (tc) {
-          doneCalls.push(tc);
-          this._totalSeen++;
-        } else {
-          safeParts.push(jsonStr);
-        }
+        continue;
+      }
+
+      // ── Inside a bare {"name":"…","arguments":{…}} block ──
+      if (this.inBareCall) {
+        if (!this._consumeJsonBlock(s => this._parseBareToolCallJson(s), doneCalls, safeParts)) break;
+        this.inBareCall = false;
         continue;
       }
 
@@ -326,6 +356,7 @@ export class ToolCallStreamParser {
       const tcIdx = this.buffer.indexOf(TC_OPEN);
       const trIdx = this.buffer.indexOf(TR_PREFIX);
       const tcCodeIdx = this.buffer.indexOf(TC_CODE);
+      const tcBareIdx = this.buffer.indexOf(TC_BARE);
 
       let nextIdx = -1;
       let tagType = null;
@@ -333,6 +364,7 @@ export class ToolCallStreamParser {
       if (tcIdx !== -1) candidates.push({ idx: tcIdx, type: 'tc' });
       if (trIdx !== -1) candidates.push({ idx: trIdx, type: 'tr' });
       if (tcCodeIdx !== -1) candidates.push({ idx: tcCodeIdx, type: 'code' });
+      if (tcBareIdx !== -1 && tcBareIdx !== tcCodeIdx) candidates.push({ idx: tcBareIdx, type: 'bare' });
       if (candidates.length) {
         candidates.sort((a, b) => a.idx - b.idx);
         nextIdx = candidates[0].idx;
@@ -341,7 +373,7 @@ export class ToolCallStreamParser {
 
       if (nextIdx === -1) {
         let holdLen = 0;
-        for (const prefix of [TC_OPEN, TR_PREFIX, TC_CODE]) {
+        for (const prefix of [TC_OPEN, TR_PREFIX, TC_CODE, TC_BARE]) {
           const maxHold = Math.min(prefix.length - 1, this.buffer.length);
           for (let len = maxHold; len > 0; len--) {
             if (this.buffer.endsWith(prefix.slice(0, len))) {
@@ -372,6 +404,9 @@ export class ToolCallStreamParser {
       } else if (tagType === 'code') {
         this.buffer = this.buffer.slice(nextIdx);
         this.inToolCode = true;
+      } else if (tagType === 'bare') {
+        this.buffer = this.buffer.slice(nextIdx);
+        this.inBareCall = true;
       }
     }
 
@@ -392,6 +427,12 @@ export class ToolCallStreamParser {
     if (this.inToolCode) {
       this.inToolCode = false;
       const tc = this._parseToolCodeJson(remaining);
+      if (tc) { this._totalSeen++; return { text: '', toolCalls: [tc] }; }
+      return { text: remaining, toolCalls: [] };
+    }
+    if (this.inBareCall) {
+      this.inBareCall = false;
+      const tc = this._parseBareToolCallJson(remaining);
       if (tc) { this._totalSeen++; return { text: '', toolCalls: [tc] }; }
       return { text: remaining, toolCalls: [] };
     }
