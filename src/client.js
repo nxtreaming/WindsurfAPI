@@ -91,7 +91,16 @@ export class WindsurfClient {
    */
   rawGetChatMessage(messages, modelEnum, modelName, opts = {}) {
     const { onChunk, onEnd, onError } = opts;
-    const proto = buildRawGetChatMessageRequest(this.apiKey, messages, modelEnum, modelName);
+    // Reuse the LS-scoped session_id instead of letting buildMetadata
+    // mint a fresh UUID on every call. A stable session per LS matches
+    // what a real Windsurf IDE instance sends (one session for the whole
+    // window's lifetime) and gives upstream fingerprinting less to latch
+    // onto. Cascade path already does this via lsEntry.sessionId; this
+    // closes the same gap for the legacy channel.
+    const lsEntry = getLsEntryByPort(this.port);
+    if (lsEntry && !lsEntry.sessionId) lsEntry.sessionId = randomUUID();
+    const sessionId = lsEntry?.sessionId;
+    const proto = buildRawGetChatMessageRequest(this.apiKey, messages, modelEnum, modelName, sessionId);
     const body = grpcFrame(proto);
 
     log.debug(`RawGetChatMessage: enum=${modelEnum} msgs=${messages.length}`);

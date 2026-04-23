@@ -136,6 +136,12 @@ export function grpcUnary(port, csrfToken, path, body, timeout = 30000) {
       ':path': path,
       'content-type': 'application/grpc',
       'te': 'trailers',
+      // Match the official Go Windsurf client so upstream fingerprinting
+      // doesn't flag the unary channel separately from the stream one.
+      // grpcStream already sends this header; aligning unary closes the
+      // remaining gap (see project_antiproxy_fingerprint.md item: gRPC
+      // user-agent).
+      'user-agent': 'grpc-node/1.108.2',
       'x-codeium-csrf-token': csrfToken,
     });
 
