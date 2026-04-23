@@ -46,7 +46,7 @@ function checkAuth(req) {
     } catch {}
   }
   if (config.dashboardPassword) return pw === config.dashboardPassword;
-  if (config.apiKey) return !pw || pw === config.apiKey;
+  if (config.apiKey) return pw === config.apiKey;
   return true;
 }
 
