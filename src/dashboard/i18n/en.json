@@ -152,7 +152,7 @@
     "weeklyShort": "W",
     "promptShort": "P",
     "columnTitle": "Quota Usage",
-    "columnTooltip": "Three bars indicate:\nD — Daily premium-request remaining %\nW — Weekly premium-request remaining %\nP — Monthly prompt-credit remaining %\n\nHigher = more left = safer\nHover each bar for reset time",
+    "columnTooltip": "Two bars indicate:\nD — Daily premium-request remaining %\nW — Weekly premium-request remaining % (main signal for Trial accounts)\n\nHigher = more left = safer\nHover each bar for reset time",
     "dailyDetail": "Daily {{pct}}% remaining (resets {{reset}})",
     "weeklyDetail": "Weekly {{pct}}% remaining (resets {{reset}})",
     "promptDetail": "Prompt credits {{remain}} / {{limit}} remaining ({{pct}}%)",
@@ -501,9 +501,19 @@
   },
 
   "range": {
-    "6h": "Last 6h",
-    "24h": "Last 24h",
-    "72h": "Last 72h"
+    "6h": "6h",
+    "24h": "24h",
+    "72h": "72h",
+    "7d": "7d",
+    "30d": "30d",
+    "all": "All",
+    "custom": "Custom",
+    "customTitle": "Custom Date Range",
+    "customStart": "Start Date",
+    "customEnd": "End Date",
+    "customApply": "Apply",
+    "customCancel": "Cancel",
+    "customHint": "Showing up to last 30 days"
   },
 
   "credits": {

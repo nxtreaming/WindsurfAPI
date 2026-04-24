@@ -758,12 +758,74 @@ tbody tr:hover td { background: var(--surface-2); }
 .chart-canvas-wrap {
   position: relative;
   width: 100%;
-  height: 240px;
+  height: 280px;
+  padding-top: 6px;
 }
 .chart-canvas-wrap canvas {
   width: 100%;
   height: 100%;
   display: block;
+}
+.chart-range-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  padding: 3px 8px;
+  background: rgba(255,255,255,.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  pointer-events: none;
+  letter-spacing: .01em;
+}
+
+/* Custom date range popup */
+.custom-range-popup {
+  position: relative;
+  margin-top: 14px;
+  padding: 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-width: 420px;
+}
+.custom-range-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text);
+}
+.custom-range-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.custom-range-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+  letter-spacing: .01em;
+}
+.custom-range-fields input[type="date"] {
+  font-family: var(--mono);
+  font-size: 12px;
+  color-scheme: dark;
+}
+.custom-range-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+.custom-range-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 .chart-tooltip {
   position: absolute;
@@ -1496,7 +1558,7 @@ window._firebaseOAuth = async function(provider) {
       <div class="section-body tight">
         <div class="table-wrap">
           <table id="accounts-table">
-            <thead><tr><th data-i18n="table.header.id">ID</th><th data-i18n="table.header.label">标签</th><th data-i18n="table.header.tier">层级</th><th data-i18n="table.header.rpm">RPM</th><th class="th-help" data-i18n="table.header.credits" data-i18n-title="creditsBar.columnTooltip" title="配额使用情况&#10;&#10;日 — 每日高级请求剩余百分比&#10;周 — 每周高级请求剩余百分比&#10;词 — 本月提示词额度剩余百分比&#10;&#10;数值越高 = 剩余越多 = 越安全&#10;悬停单条进度条可查看重置时间">余额</th><th data-i18n="table.header.models">可用模型</th><th data-i18n="table.header.status">状态</th><th data-i18n="table.header.error">错误</th><th data-i18n="table.header.lastUsed">最后使用</th><th data-i18n="table.header.key">Key</th><th data-i18n="table.header.action">操作</th></tr></thead>
+            <thead><tr><th data-i18n="table.header.id">ID</th><th data-i18n="table.header.label">标签</th><th data-i18n="table.header.tier">层级</th><th data-i18n="table.header.rpm">RPM</th><th class="th-help" data-i18n="table.header.credits" data-i18n-title="creditsBar.columnTooltip" title="配额使用情况&#10;&#10;日 — 每日高级请求剩余百分比（重置频繁）&#10;周 — 每周高级请求剩余百分比（Trial 账号重点看这条）&#10;&#10;数值越高 = 剩余越多 = 越安全&#10;悬停单条进度条可查看重置时间">余额</th><th data-i18n="table.header.models">可用模型</th><th data-i18n="table.header.status">状态</th><th data-i18n="table.header.error">错误</th><th data-i18n="table.header.lastUsed">最后使用</th><th data-i18n="table.header.key">Key</th><th data-i18n="table.header.action">操作</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1696,15 +1758,37 @@ window._firebaseOAuth = async function(provider) {
             <button class="seg-btn stats-type-btn" data-type="stacked" onclick="App.setChartType('stacked')" data-i18n="section.requestChart.typeStacked">堆叠图</button>
           </div>
           <div class="seg-group" role="tablist">
-            <button class="seg-btn stats-range-btn" data-range="6" onclick="App.setStatsRange(6)" data-i18n="range.6h">近 6h</button>
-            <button class="seg-btn stats-range-btn active" data-range="24" onclick="App.setStatsRange(24)" data-i18n="range.24h">近 24h</button>
-            <button class="seg-btn stats-range-btn" data-range="72" onclick="App.setStatsRange(72)" data-i18n="range.72h">近 72h</button>
+            <button class="seg-btn stats-range-btn" data-range="6" onclick="App.setStatsRange(6)" data-i18n="range.6h">6小时</button>
+            <button class="seg-btn stats-range-btn active" data-range="24" onclick="App.setStatsRange(24)" data-i18n="range.24h">24小时</button>
+            <button class="seg-btn stats-range-btn" data-range="168" onclick="App.setStatsRange(168)" data-i18n="range.7d">7天</button>
+            <button class="seg-btn stats-range-btn" data-range="720" onclick="App.setStatsRange(720)" data-i18n="range.30d">30天</button>
+            <button class="seg-btn stats-range-btn" data-range="all" onclick="App.setStatsRange('all')" data-i18n="range.all">全部</button>
+            <button class="seg-btn stats-range-btn" data-range="custom" onclick="App.openCustomRange()" data-i18n="range.custom">自定义</button>
           </div>
         </div>
       </div>
       <div class="chart-canvas-wrap">
         <canvas id="stats-canvas"></canvas>
         <div class="chart-tooltip" id="stats-tooltip"></div>
+        <div class="chart-range-indicator" id="stats-range-indicator"></div>
+      </div>
+      <div class="custom-range-popup" id="custom-range-popup" style="display:none">
+        <div class="custom-range-title" data-i18n="range.customTitle">自定义日期范围</div>
+        <div class="custom-range-fields">
+          <label>
+            <span data-i18n="range.customStart">起始日期</span>
+            <input type="date" id="range-start" class="input">
+          </label>
+          <label>
+            <span data-i18n="range.customEnd">结束日期</span>
+            <input type="date" id="range-end" class="input">
+          </label>
+        </div>
+        <div class="custom-range-hint" data-i18n="range.customHint">最多显示最近 30 天数据</div>
+        <div class="custom-range-actions">
+          <button class="btn btn-ghost btn-sm" onclick="App.closeCustomRange()" data-i18n="range.customCancel">取消</button>
+          <button class="btn btn-primary btn-sm" onclick="App.applyCustomRange()" data-i18n="range.customApply">应用</button>
+        </div>
       </div>
       <div class="chart-legend" id="stats-legend"></div>
     </div>
@@ -2789,7 +2873,6 @@ const App = {
             <span class="text-xs" style="width:28px;text-align:right;color:${c};font-size:10px">${noData ? '--' : v.toFixed(0)+'%'}</span>
           </div>`;
         };
-        const promptPct = cr.prompt?.limit ? ((cr.prompt.remaining || 0) / cr.prompt.limit) * 100 : null;
         const fmtReset = (unix) => unix ? new Date(unix * 1000).toLocaleString() : I18n.t('creditsBar.noResetTime');
         const dailyTip = cr.dailyPercent != null
           ? I18n.t('creditsBar.dailyDetail', { pct: cr.dailyPercent.toFixed(0), reset: fmtReset(cr.dailyResetAt) })
@@ -2797,17 +2880,12 @@ const App = {
         const weeklyTip = cr.weeklyPercent != null
           ? I18n.t('creditsBar.weeklyDetail', { pct: cr.weeklyPercent.toFixed(0), reset: fmtReset(cr.weeklyResetAt) })
           : I18n.t('creditsBar.weeklyNA');
-        const promptTip = cr.prompt?.limit
-          ? I18n.t('creditsBar.promptDetail', { remain: cr.prompt.remaining || 0, limit: cr.prompt.limit, pct: (promptPct || 0).toFixed(0) })
-          : I18n.t('creditsBar.promptNA');
         const shortD = I18n.t('creditsBar.dailyShort');
         const shortW = I18n.t('creditsBar.weeklyShort');
-        const shortP = I18n.t('creditsBar.promptShort');
         creditCell = `<div style="min-width:120px;max-width:160px">
             <div class="text-xs" style="margin-bottom:2px"><b>${this.esc(planName.slice(0, 12))}</b> <span style="color:var(--text-dim)">${fetchedAgo}</span></div>
             ${bar(shortD, cr.dailyPercent, dailyTip)}
             ${bar(shortW, cr.weeklyPercent, weeklyTip)}
-            ${bar(shortP, promptPct, promptTip)}
           </div>`;
       }
       return `
@@ -3370,21 +3448,63 @@ const App = {
   },
 
   // ─── Stats ───────────────────────────────────
-  statsRange: 24,
+  statsRange: 24,            // number of hours, or 'all', or 'custom'
+  statsCustomRange: null,    // { start: Date, end: Date } when range='custom'
   statsChartType: 'area',
   statsMetrics: { requests: true, success: true, errors: true },
   _lastStatsData: null,
+  // Softer, more cohesive palette — indigo / emerald / rose
   _chartColors: {
-    requests: '#3b82f6',
-    success: '#22c55e',
-    errors: '#ef4444',
+    requests: '#818cf8',   // indigo-400
+    success:  '#34d399',   // emerald-400
+    errors:   '#fb7185',   // rose-400
   },
-  _pieColors: ['#6366f1', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a78bfa', '#14b8a6', '#ec4899'],
+  _pieColors: ['#818cf8', '#34d399', '#fb7185', '#fbbf24', '#60a5fa', '#c084fc', '#22d3ee', '#f472b6'],
 
-  setStatsRange(hours) {
-    this.statsRange = hours;
+  setStatsRange(value) {
+    this.statsRange = value;
+    this.statsCustomRange = null;
     document.querySelectorAll('.stats-range-btn').forEach(b => {
-      b.classList.toggle('active', Number(b.dataset.range) === hours);
+      b.classList.toggle('active', String(b.dataset.range) === String(value));
+    });
+    this.closeCustomRange();
+    if (this._lastStatsData) this.renderMainChart(this._lastStatsData);
+  },
+
+  openCustomRange() {
+    const popup = document.getElementById('custom-range-popup');
+    if (!popup) return;
+    popup.style.display = 'block';
+    // Default to last 7 days
+    const end = new Date();
+    const start = new Date(end.getTime() - 7 * 86400_000);
+    const fmt = d => d.toISOString().slice(0, 10);
+    const sEl = document.getElementById('range-start');
+    const eEl = document.getElementById('range-end');
+    if (sEl && !sEl.value) sEl.value = fmt(start);
+    if (eEl && !eEl.value) eEl.value = fmt(end);
+    document.querySelectorAll('.stats-range-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.range === 'custom');
+    });
+  },
+
+  closeCustomRange() {
+    const popup = document.getElementById('custom-range-popup');
+    if (popup) popup.style.display = 'none';
+  },
+
+  applyCustomRange() {
+    const sEl = document.getElementById('range-start');
+    const eEl = document.getElementById('range-end');
+    if (!sEl?.value || !eEl?.value) { this.toast(I18n.t('range.customStart'), 'error'); return; }
+    const start = new Date(sEl.value + 'T00:00:00');
+    const end = new Date(eEl.value + 'T23:59:59');
+    if (isNaN(start) || isNaN(end) || start > end) { this.toast('Invalid range', 'error'); return; }
+    this.statsRange = 'custom';
+    this.statsCustomRange = { start, end };
+    this.closeCustomRange();
+    document.querySelectorAll('.stats-range-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.range === 'custom');
     });
     if (this._lastStatsData) this.renderMainChart(this._lastStatsData);
   },
@@ -3475,66 +3595,140 @@ const App = {
     return { ctx, W: rect.width, H: rect.height };
   },
 
-  renderMainChart(d) {
-    const canvas = document.getElementById('stats-canvas');
-    const legend = document.getElementById('stats-legend');
-    const tipEl = document.getElementById('stats-tooltip');
-    if (!canvas) return;
-
-    const buckets = (d.hourlyBuckets || []).slice(-this.statsRange).map(b => ({
+  _filterBuckets(raw) {
+    const all = (raw || []).map(b => ({
       hour: b.hour,
+      t: new Date(b.hour).getTime(),
       requests: b.requests || 0,
       errors: b.errors || 0,
       success: Math.max(0, (b.requests || 0) - (b.errors || 0)),
     }));
+    if (this.statsRange === 'custom' && this.statsCustomRange) {
+      const { start, end } = this.statsCustomRange;
+      return all.filter(b => b.t >= start.getTime() && b.t <= end.getTime());
+    }
+    if (this.statsRange === 'all' || this.statsRange === -1) return all;
+    const n = Number(this.statsRange);
+    return all.slice(-n);
+  },
+
+  // Aggregate contiguous buckets so the chart stays readable when we have
+  // hundreds of data points (e.g. 30d = 720 hourly buckets).
+  _downsample(buckets, maxPoints) {
+    if (buckets.length <= maxPoints) return buckets;
+    const step = Math.ceil(buckets.length / maxPoints);
+    const out = [];
+    for (let i = 0; i < buckets.length; i += step) {
+      const g = buckets.slice(i, i + step);
+      const mid = g[Math.floor(g.length / 2)];
+      out.push({
+        hour: mid.hour,
+        t: mid.t,
+        requests: g.reduce((a, b) => a + b.requests, 0),
+        errors:   g.reduce((a, b) => a + b.errors,   0),
+        success:  g.reduce((a, b) => a + b.success,  0),
+      });
+    }
+    return out;
+  },
+
+  // Catmull-Rom → Bezier spline. Set move=false to continue the current
+  // sub-path (important for area fills where we start from the baseline).
+  _smoothPath(ctx, points, move = true) {
+    if (points.length < 1) return;
+    if (move) ctx.moveTo(points[0].x, points[0].y);
+    else ctx.lineTo(points[0].x, points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i - 1] || points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2] || p2;
+      const tension = 0.28;
+      const cp1x = p1.x + (p2.x - p0.x) * tension;
+      const cp1y = p1.y + (p2.y - p0.y) * tension;
+      const cp2x = p2.x - (p3.x - p1.x) * tension;
+      const cp2y = p2.y - (p3.y - p1.y) * tension;
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    }
+  },
+
+  renderMainChart(d) {
+    const canvas = document.getElementById('stats-canvas');
+    const legend = document.getElementById('stats-legend');
+    const tipEl = document.getElementById('stats-tooltip');
+    const rangeIndicator = document.getElementById('stats-range-indicator');
+    if (!canvas) return;
+
+    let buckets = this._filterBuckets(d.hourlyBuckets);
+    // Downsample if too many points
+    const MAX_POINTS = 160;
+    const originalLength = buckets.length;
+    buckets = this._downsample(buckets, MAX_POINTS);
 
     const { ctx, W, H } = this._setupCanvas(canvas);
     ctx.clearRect(0, 0, W, H);
 
+    // Range indicator text (top-right badge above the chart)
+    if (rangeIndicator) {
+      const rangeText = this._rangeLabel(originalLength, buckets.length);
+      rangeIndicator.textContent = rangeText;
+      rangeIndicator.style.display = rangeText ? 'block' : 'none';
+    }
+
     if (buckets.length < 1) {
-      ctx.fillStyle = 'rgba(255,255,255,.3)';
-      ctx.font = '13px sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.font = '500 13px var(--font), sans-serif';
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText(I18n.t('table.empty.noData'), W / 2, H / 2);
       if (legend) legend.innerHTML = '';
       return;
     }
 
-    const pad = { t: 14, r: 16, b: 28, l: 44 };
+    const pad = { t: 18, r: 14, b: 30, l: 44 };
     const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b;
     const step = buckets.length > 1 ? cW / (buckets.length - 1) : cW;
     const slotW = buckets.length > 1 ? cW / buckets.length : cW;
     const m = this.statsMetrics;
     const type = this.statsChartType;
 
-    // Compute y-max based on chart type + enabled metrics
+    // y-max (stacked uses sum of success + errors per bucket)
     let maxY;
     if (type === 'stacked') {
-      maxY = Math.max(1, ...buckets.map(b => {
-        let s = 0;
-        if (m.success) s += b.success;
-        if (m.errors) s += b.errors;
-        return s || (m.requests ? b.requests : 0);
-      }));
+      maxY = Math.max(1, ...buckets.map(b => (m.success ? b.success : 0) + (m.errors ? b.errors : 0) || (m.requests ? b.requests : 0)));
+    } else if (type === 'bar') {
+      // Bar mode: one bar per bucket = requests total, regardless of other toggles
+      maxY = Math.max(1, ...buckets.map(b => b.requests));
     } else {
       const vals = [];
       if (m.requests) vals.push(...buckets.map(b => b.requests));
-      if (m.success) vals.push(...buckets.map(b => b.success));
-      if (m.errors) vals.push(...buckets.map(b => b.errors));
+      if (m.success)  vals.push(...buckets.map(b => b.success));
+      if (m.errors)   vals.push(...buckets.map(b => b.errors));
       maxY = Math.max(1, ...vals);
     }
-    // Round up to nice number
-    const nice = (n) => {
+    const niceY = (n) => {
       const exp = Math.pow(10, Math.floor(Math.log10(n)));
       const frac = n / exp;
-      const niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
-      return niceFrac * exp;
+      const fr = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 2.5 ? 2.5 : frac <= 5 ? 5 : 10;
+      return fr * exp;
     };
-    maxY = nice(maxY);
+    maxY = niceY(maxY);
 
-    // Grid
-    ctx.strokeStyle = 'rgba(255,255,255,.05)';
+    const xAt = (i) => buckets.length > 1 ? pad.l + i * step : pad.l + cW / 2;
+    const yAt = (v) => pad.t + cH - (v / maxY) * cH;
+
+    // Background gradient fade for the plot area — very subtle
+    const bgGrad = ctx.createLinearGradient(0, pad.t, 0, pad.t + cH);
+    bgGrad.addColorStop(0, 'rgba(129,140,248,.02)');
+    bgGrad.addColorStop(1, 'rgba(129,140,248,0)');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(pad.l, pad.t, cW, cH);
+
+    // Horizontal grid (dashed)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.045)';
     ctx.lineWidth = 1;
+    ctx.setLineDash([2, 4]);
     for (let i = 0; i <= 4; i++) {
       const y = pad.t + (cH / 4) * i;
       ctx.beginPath();
@@ -3542,136 +3736,173 @@ const App = {
       ctx.lineTo(W - pad.r, y);
       ctx.stroke();
     }
+    ctx.restore();
 
     // Y-axis labels
-    ctx.fillStyle = 'rgba(255,255,255,.35)';
-    ctx.font = '10px var(--mono), monospace';
+    ctx.fillStyle = 'rgba(255,255,255,.38)';
+    ctx.font = '500 10px "JetBrains Mono", "Consolas", monospace';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let i = 0; i <= 4; i++) {
       const v = Math.round(maxY * (4 - i) / 4);
       const y = pad.t + (cH / 4) * i;
-      ctx.fillText(v, pad.l - 8, y);
+      ctx.fillText(this._fmtNum(v), pad.l - 10, y);
     }
 
-    // X coordinate for bucket i
-    const xAt = (i) => buckets.length > 1 ? pad.l + i * step : pad.l + cW / 2;
-    const yAt = (v) => pad.t + cH - (v / maxY) * cH;
-
-    const drawSeries = (values, color, opts = {}) => {
-      if (buckets.length < 2) {
-        // single point
-        const x = xAt(0);
-        const y = yAt(values[0]);
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
-        return;
-      }
-      // Area fill
-      if (opts.fill) {
+    const drawSmoothSeries = (values, color, opts = {}) => {
+      const points = values.map((v, i) => ({ x: xAt(i), y: yAt(v) }));
+      if (points.length < 1) return;
+      // Fill
+      if (opts.fill && points.length >= 2) {
         const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + cH);
-        grad.addColorStop(0, color + '55');
-        grad.addColorStop(1, color + '05');
-        ctx.beginPath();
-        ctx.moveTo(xAt(0), pad.t + cH);
-        values.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
-        ctx.lineTo(xAt(values.length - 1), pad.t + cH);
-        ctx.closePath();
+        grad.addColorStop(0, color + '4d');
+        grad.addColorStop(1, color + '00');
         ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, pad.t + cH);
+        this._smoothPath(ctx, points, false);
+        ctx.lineTo(points[points.length - 1].x, pad.t + cH);
+        ctx.closePath();
         ctx.fill();
       }
-      // Line
-      ctx.beginPath();
+      // Line with shadow glow
+      ctx.save();
       ctx.strokeStyle = color;
-      ctx.lineWidth = opts.thin ? 1.5 : 2;
-      if (opts.dash) ctx.setLineDash([4, 3]);
+      ctx.lineWidth = opts.thin ? 1.5 : 2.25;
+      ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      values.forEach((v, i) => {
-        const x = xAt(i), y = yAt(v);
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
+      if (opts.dash) ctx.setLineDash([5, 4]);
+      ctx.shadowColor = color;
+      ctx.shadowBlur = opts.fill ? 8 : 4;
+      ctx.beginPath();
+      if (points.length >= 2) {
+        this._smoothPath(ctx, points);
+      } else {
+        ctx.moveTo(points[0].x, points[0].y);
+      }
       ctx.stroke();
-      ctx.setLineDash([]);
-      // Dots
-      values.forEach((v, i) => {
-        if (v === 0) return;
-        ctx.beginPath();
-        ctx.arc(xAt(i), yAt(v), 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-      });
+      ctx.restore();
+      // Data points — only when not too dense, and only on nonzero
+      if (points.length <= 80) {
+        points.forEach((p, i) => {
+          if (values[i] === 0) return;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = 'var(--bg)';
+          ctx.fillStyle = '#09090b';
+          ctx.fill();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+        });
+      }
     };
 
     const drawBars = () => {
-      const barW = Math.max(3, Math.min(18, slotW * 0.7));
-      const metrics = [];
-      if (m.requests) metrics.push({ key: 'requests', color: this._chartColors.requests });
-      if (m.success) metrics.push({ key: 'success', color: this._chartColors.success });
-      if (m.errors) metrics.push({ key: 'errors', color: this._chartColors.errors });
-      if (!metrics.length) return;
-      const subW = barW / metrics.length;
+      // Single bar per bucket. Color grades from indigo (no errors) through
+      // amber (some) to rose (majority errors). That keeps the chart legible
+      // with wide bars while surfacing errors through color alone.
+      const gap = Math.min(3, slotW * 0.2);
+      const barW = Math.max(2, slotW - gap);
       buckets.forEach((b, i) => {
-        const cx = xAt(i);
-        metrics.forEach((mk, mi) => {
-          const v = b[mk.key];
-          if (v === 0) return;
-          const h = (v / maxY) * cH;
-          const x = cx - barW / 2 + mi * subW;
-          const y = pad.t + cH - h;
-          ctx.fillStyle = mk.color;
-          this._roundRect(ctx, x, y, Math.max(subW - 1, 1), h, 2);
+        const v = b.requests;
+        if (v === 0) return;
+        const h = (v / maxY) * cH;
+        const errRatio = v > 0 ? b.errors / v : 0;
+        const color = this._errorTintedColor(errRatio);
+        const x = xAt(i) - barW / 2;
+        const y = pad.t + cH - h;
+        // Gradient fill (brighter at top)
+        const grad = ctx.createLinearGradient(0, y, 0, y + h);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, color + 'cc');
+        ctx.fillStyle = grad;
+        const rr = Math.min(barW / 2, 3);
+        this._roundRect(ctx, x, y, barW, h, rr);
+        ctx.fill();
+        // Subtle top highlight
+        if (barW > 4) {
+          ctx.fillStyle = 'rgba(255,255,255,.1)';
+          this._roundRect(ctx, x, y, barW, Math.min(2, h), rr);
           ctx.fill();
-        });
+        }
       });
     };
 
     const drawStacked = () => {
-      const barW = Math.max(4, Math.min(22, slotW * 0.75));
+      const gap = Math.min(3, slotW * 0.2);
+      const barW = Math.max(2, slotW - gap);
       buckets.forEach((b, i) => {
         const cx = xAt(i);
         let stackV = 0;
         const segments = [];
         if (m.success && b.success > 0) segments.push({ v: b.success, color: this._chartColors.success });
-        if (m.errors && b.errors > 0) segments.push({ v: b.errors, color: this._chartColors.errors });
-        segments.forEach(seg => {
+        if (m.errors  && b.errors  > 0) segments.push({ v: b.errors,  color: this._chartColors.errors  });
+        if (!segments.length && m.requests && b.requests > 0) segments.push({ v: b.requests, color: this._chartColors.requests });
+        segments.forEach((seg, si) => {
           const h = (seg.v / maxY) * cH;
           const y = pad.t + cH - ((stackV + seg.v) / maxY) * cH;
-          ctx.fillStyle = seg.color;
-          this._roundRect(ctx, cx - barW / 2, y, barW, h, 2);
+          const isTop = si === segments.length - 1;
+          const rr = Math.min(barW / 2, 3);
+          const grad = ctx.createLinearGradient(0, y, 0, y + h);
+          grad.addColorStop(0, seg.color);
+          grad.addColorStop(1, seg.color + 'b3');
+          ctx.fillStyle = grad;
+          if (isTop) {
+            this._roundRectTop(ctx, cx - barW / 2, y, barW, h, rr);
+          } else {
+            ctx.fillRect(cx - barW / 2, y, barW, h);
+          }
           ctx.fill();
           stackV += seg.v;
         });
       });
     };
 
-    // Render based on type
+    // Render by type
     if (type === 'bar') {
       drawBars();
     } else if (type === 'stacked') {
       drawStacked();
     } else {
-      // area or line
+      // area / line
       const fill = type === 'area';
-      if (m.requests) drawSeries(buckets.map(b => b.requests), this._chartColors.requests, { fill });
-      if (m.success) drawSeries(buckets.map(b => b.success), this._chartColors.success, { fill });
-      if (m.errors) drawSeries(buckets.map(b => b.errors), this._chartColors.errors, { fill: false, thin: true, dash: type === 'area' });
+      // Order matters: draw success below errors below requests for z-order
+      if (m.success) drawSmoothSeries(buckets.map(b => b.success), this._chartColors.success, { fill: fill, thin: false });
+      if (m.errors)  drawSmoothSeries(buckets.map(b => b.errors),  this._chartColors.errors,  { fill: false, thin: true, dash: false });
+      if (m.requests && type === 'line') drawSmoothSeries(buckets.map(b => b.requests), this._chartColors.requests, { fill: false, thin: false });
+      if (m.requests && type === 'area') drawSmoothSeries(buckets.map(b => b.requests), this._chartColors.requests, { fill: true, thin: false });
     }
 
-    // X-axis labels
-    ctx.fillStyle = 'rgba(255,255,255,.35)';
-    ctx.font = '10px var(--mono), monospace';
+    // X-axis labels — smart step based on time span
+    ctx.fillStyle = 'rgba(255,255,255,.38)';
+    ctx.font = '500 10px "JetBrains Mono", "Consolas", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    const labelStep = Math.max(1, Math.floor(buckets.length / 8));
+    const spanHours = buckets.length > 1 ? (buckets[buckets.length - 1].t - buckets[0].t) / 3600_000 : 0;
+    const useDate = spanHours >= 48;
+    const labelCount = Math.min(8, buckets.length);
+    const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
+    let lastLabel = null;
+    let lastX = -Infinity;
+    const minGapPx = useDate ? 48 : 36;
     buckets.forEach((b, i) => {
       if (i % labelStep !== 0 && i !== buckets.length - 1) return;
-      const hr = new Date(b.hour).getHours();
-      ctx.fillText(hr.toString().padStart(2, '0') + ':00', xAt(i), pad.t + cH + 8);
+      const dt = new Date(b.hour);
+      const txt = useDate
+        ? `${dt.getMonth() + 1}/${dt.getDate()}`
+        : dt.getHours().toString().padStart(2, '0') + ':00';
+      // Skip if same label as last one (e.g. several points on the same day)
+      // or too close pixel-wise.
+      const x = xAt(i);
+      if (txt === lastLabel) return;
+      if (x - lastX < minGapPx && i !== buckets.length - 1) return;
+      lastLabel = txt;
+      lastX = x;
+      ctx.fillText(txt, x, pad.t + cH + 10);
     });
 
-    // Store hit-map for tooltip
+    // Hit-map for tooltip
     this._chartHitMap = { buckets, xAt, yAt, pad, cH, slotW, W, H };
 
     // Hover tooltip
@@ -3750,6 +3981,70 @@ const App = {
     ctx.lineTo(x, y + rr);
     ctx.quadraticCurveTo(x, y, x + rr, y);
     ctx.closePath();
+  },
+
+  _roundRectTop(ctx, x, y, w, h, r) {
+    if (h <= 0 || w <= 0) return;
+    const rr = Math.min(r, w / 2, h);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.lineTo(x, y + rr);
+    ctx.quadraticCurveTo(x, y, x + rr, y);
+    ctx.closePath();
+  },
+
+  // Interpolate indigo → amber → rose based on error ratio. Returns hex so
+  // callers can safely append alpha suffixes like '+cc'.
+  _errorTintedColor(ratio) {
+    const clamp01 = (x) => Math.max(0, Math.min(1, x));
+    const r = clamp01(ratio);
+    if (r === 0) return this._chartColors.requests; // indigo
+    const mix = (c1, c2, t) => {
+      const p1 = this._hexToRgb(c1), p2 = this._hexToRgb(c2);
+      const rr = Math.round(p1.r + (p2.r - p1.r) * t);
+      const gg = Math.round(p1.g + (p2.g - p1.g) * t);
+      const bb = Math.round(p1.b + (p2.b - p1.b) * t);
+      const to2 = (n) => n.toString(16).padStart(2, '0');
+      return '#' + to2(rr) + to2(gg) + to2(bb);
+    };
+    if (r <= 0.3) return mix('#818cf8', '#fbbf24', r / 0.3);
+    return mix('#fbbf24', '#fb7185', (r - 0.3) / 0.7);
+  },
+
+  _hexToRgb(h) {
+    const s = h.replace('#', '');
+    return {
+      r: parseInt(s.slice(0, 2), 16),
+      g: parseInt(s.slice(2, 4), 16),
+      b: parseInt(s.slice(4, 6), 16),
+    };
+  },
+
+  _fmtNum(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(n);
+  },
+
+  _rangeLabel(originalPts, shownPts) {
+    if (!originalPts) return '';
+    const fmt = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+    if (this.statsRange === 'custom' && this.statsCustomRange) {
+      const { start, end } = this.statsCustomRange;
+      return `${fmt(start)} – ${fmt(end)}  ·  ${originalPts} pts`;
+    }
+    if (this.statsRange === 'all' || this.statsRange === -1) {
+      return `All · ${originalPts} pts`;
+    }
+    const hours = Number(this.statsRange);
+    if (hours <= 72) return `${hours}h · ${originalPts} pts`;
+    const days = Math.round(hours / 24);
+    const note = shownPts < originalPts ? ` (sampled to ${shownPts})` : '';
+    return `${days}d · ${originalPts} pts${note}`;
   },
 
   renderModelPie(d) {
