@@ -12,7 +12,7 @@ import { config, log } from '../config.js';
 import { recordRequest } from '../dashboard/stats.js';
 import { isModelAllowed } from '../dashboard/model-access.js';
 import { cacheKey, cacheGet, cacheSet } from '../cache.js';
-import { isExperimentalEnabled, getIdentityPromptFor } from '../runtime-config.js';
+import { isExperimentalEnabled } from '../runtime-config.js';
 import { checkMessageRateLimit } from '../windsurf-api.js';
 import { getEffectiveProxy } from '../dashboard/proxy-config.js';
 import {
@@ -80,54 +80,11 @@ function extractJsonPayload(text) {
   return trimmed;
 }
 
-// ── Language-following reinforcement ──────────────────────────
-// Claude Code injects ~100KB of English system prompt + tool definitions
-// into the conversation, which drowns out the communication_section
-// (proto field 13) language instruction. Detecting CJK characters in the
-// user's latest message and appending a brief reminder directly into the
-// message content ensures the model sees it at the point of highest
-// attention. Only modifies cascadeMessages (not the original messages
-// used for fingerprinting). (#35)
-const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
-const JP_RE  = /[\u3040-\u309f\u30a0-\u30ff]/;
-const KR_RE  = /[\uac00-\ud7af]/;
-
-function injectLanguageHint(msgs) {
-  if (!Array.isArray(msgs)) return;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i]?.role !== 'user') continue;
-    const c = msgs[i].content;
-    const text = typeof c === 'string' ? c
-      : Array.isArray(c) ? c.filter(p => p?.type === 'text').map(p => p.text).join('') : '';
-    let hint = '';
-    if (CJK_RE.test(text))      hint = '\n\n[IMPORTANT: You MUST respond entirely in Chinese (中文). Do not switch to English.]';
-    else if (JP_RE.test(text))  hint = '\n\n[IMPORTANT: You MUST respond entirely in Japanese (日本語).]';
-    else if (KR_RE.test(text))  hint = '\n\n[IMPORTANT: You MUST respond entirely in Korean (한국어).]';
-    if (!hint) break;
-    msgs[i] = { ...msgs[i] };
-    if (typeof msgs[i].content === 'string') {
-      msgs[i].content += hint;
-    } else if (Array.isArray(msgs[i].content)) {
-      msgs[i].content = [...msgs[i].content, { type: 'text', text: hint }];
-    }
-    break;
-  }
-}
 const CASCADE_REUSE_STRICT = process.env.CASCADE_REUSE_STRICT === '1';
 const CASCADE_REUSE_STRICT_RETRY_MS = (() => {
   const n = parseInt(process.env.CASCADE_REUSE_STRICT_RETRY_MS || '', 10);
   return Number.isFinite(n) && n > 0 ? n : 60_000;
 })();
-
-// ── Model identity prompt ──────────────────────────────────
-// Templates live in runtime-config (editable from the dashboard). Use {model}
-// as a placeholder for the requested model name. Only applied when the
-// experimental "modelIdentityPrompt" toggle is ON.
-function buildIdentitySystemMessage(displayModel, provider) {
-  const template = getIdentityPromptFor(provider);
-  if (!template) return null;
-  return template.replace(/\{model\}/g, displayModel);
-}
 
 function strictReuseRetryMs(availability) {
   return Math.max(1000, availability?.retryAfterMs || CASCADE_REUSE_STRICT_RETRY_MS);
@@ -326,11 +283,8 @@ export async function handleChatCompletions(body) {
   // so external test harnesses (e.g. hvoy.ai "model signature" check) see
   // exactly what they sent, not a Windsurf-internal alias like
   // `claude-opus-4-7-medium`. Fall back to the canonical name if the request
-  // omitted model. Identity-prompt injection uses `identityModelName` to
-  // pick a name the model itself recognises (strips the `-medium`/`-low`/
-  // `-high` reasoning-effort suffix Windsurf tags on).
+  // omitted model.
   const displayModel = reqModel || modelInfo?.name || config.defaultModel;
-  const identityModelName = (modelInfo?.name || displayModel).replace(/-(medium|low|high|mini)$/, '');
   const modelEnum = modelInfo?.enumValue || 0;
   const modelUid = modelInfo?.modelUid || null;
   // Cascade requires either a valid modelUid (string) or a recognized modelEnum.
@@ -360,37 +314,15 @@ export async function handleChatCompletions(body) {
     ? normalizeMessagesForCascade(messages, tools)
     : [...messages];
 
-  // Language-following hint for CJK users (#35)
-  if (useCascade) injectLanguageHint(cascadeMessages);
-
-  // Note: a bare-probe guard that prepended a strict-format system hint
-  // was tried and rolled back — an English rules message at the top of
-  // the conversation confused Cascade enough that it started ignoring
-  // short Chinese questions entirely ("请问中国首都是哪里？" came back
-  // as unrelated kindergarten content). Third-party verifiers that
-  // expect pure-API behavior (hvoy.ai identity / structured-output /
-  // PDF tests) are a known limitation of proxying Cascade's agentic
-  // persona — not something we can paper over with prompt injection
-  // without collateral damage.
-
-  // ── Model identity prompt injection ──
-  // When enabled, prepend a system message so the model identifies itself as
-  // the requested model (e.g. "I am Claude Opus 4.6") instead of leaking the
-  // Cascade/Windsurf backend identity.
-  //
-  // Skip identity injection when client already provides a system prompt
-  // (Claude Code / Cline / Cursor). Adding "You are Claude" on top of the
-  // client's system prompt triggers Cascade's anti-injection protection on
-  // reasoning models like opus-4-7. (#22)
-  const clientHasSystem = Array.isArray(messages) && messages.some(m => m?.role === 'system');
-  if (isExperimentalEnabled('modelIdentityPrompt') && modelInfo?.provider && !clientHasSystem) {
-    const identityText = buildIdentitySystemMessage(identityModelName, modelInfo.provider);
-    if (identityText) {
-      const sysMsg = { role: 'system', content: identityText };
-      cascadeMessages = [sysMsg, ...cascadeMessages];
-      messages = [sysMsg, ...messages];
-    }
-  }
+  // Note: previous versions injected (a) a CJK language-following hint into
+  // the last user message and (b) a per-provider identity system prompt
+  // ("You are Claude Opus...") when the experimental modelIdentityPrompt
+  // toggle was on. Both were removed per issue #48 — users reported unwanted
+  // system prompt residue even after turning the toggle off, and the CJK
+  // hint surfaced as an English `[IMPORTANT...]` line appended to their own
+  // message. Cascade's own communication_section (proto field 13) already
+  // handles identity neutrally; response-side neutralizeCascadeIdentity
+  // still rewrites stray "I am Cascade" leaks without touching inputs.
 
   // Global model access control (allowlist / blocklist from dashboard)
   const access = isModelAllowed(modelKey);

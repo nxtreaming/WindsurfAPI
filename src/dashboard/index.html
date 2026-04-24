@@ -2130,29 +2130,6 @@ window._firebaseOAuth = async function(provider) {
     <div class="section" style="margin-top:24px">
       <div class="section-header">
         <div>
-          <div class="section-title" data-i18n="section.identityPrompt.title">模型身份注入</div>
-          <div class="section-desc" data-i18n="section.identityPrompt.desc">开启后在每个请求最前面注入一条系统提示词，覆盖 Cascade 自带的 Windsurf 身份；下面每个厂商的模板可自定义，保存后立即生效</div>
-        </div>
-      </div>
-      <div class="section-body">
-        <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;padding:12px;background:var(--surface-2);border-radius:var(--radius)">
-          <label class="switch">
-            <input type="checkbox" id="exp-identity-prompt" onchange="App.toggleExperimental('modelIdentityPrompt', this.checked)">
-            <span class="switch-slider"></span>
-          </label>
-          <div style="flex:1">
-            <div style="font-weight:600" data-i18n="section.identityPrompt.enable">启用模型身份注入</div>
-            <div class="text-sm text-muted" data-i18n="section.identityPrompt.hint">默认开启；关闭后下面的模板不起作用</div>
-          </div>
-        </div>
-        <div class="section-desc" style="margin-bottom:10px" data-i18n="section.identityPrompt.templateHint">每个厂商的模板可编辑，{{model}} 占位符会被替换成请求的模型名（例如 claude-opus-4.6）。</div>
-        <div style="margin-bottom:10px"><input type="text" class="input" data-i18n-placeholder="field.searchProvider.placeholder" placeholder="搜索提供商..." id="identity-search" oninput="App.filterIdentityPrompts(this.value)" style="max-width:280px"></div>
-        <div id="identity-prompts-editor" style="display:grid;gap:14px"></div>
-      </div>
-    </div>
-    <div class="section" style="margin-top:24px">
-      <div class="section-header">
-        <div>
           <div class="section-title" data-i18n="section.systemPrompts.title">系统提示词</div>
           <div class="section-desc" data-i18n="section.systemPrompts.desc">工具注入、对话模式等内置提示词模板。修改后立即生效，点"重置"恢复默认。</div>
         </div>
@@ -4540,8 +4517,6 @@ const App = {
     const d = await this.api('GET', '/experimental');
     const cb = document.getElementById('exp-cascade-reuse');
     if (cb) cb.checked = !!d.flags?.cascadeConversationReuse;
-    const idCb = document.getElementById('exp-identity-prompt');
-    if (idCb) idCb.checked = !!d.flags?.modelIdentityPrompt;
     const pool = d.conversationPool || {};
     document.getElementById('exp-pool-cards').innerHTML = `
       <div class="card info">
@@ -4560,12 +4535,6 @@ const App = {
         <div class="card-sub">${I18n.t('card.stores.subtitle', { expired: pool.expired || 0, evicted: pool.evictions || 0 })}</div>
       </div>
     `;
-
-    // Identity prompts editor
-    const ip = await this.api('GET', '/identity-prompts');
-    this._identityDefaults = ip.defaults || {};
-    this._identityPrompts = ip.prompts || {};
-    this.renderIdentityPrompts('');
 
     // System prompts editor
     const sp = await this.api('GET', '/system-prompts');
@@ -4589,57 +4558,6 @@ const App = {
         </div>
       `).join('');
     }
-  },
-
-  renderIdentityPrompts(filter) {
-    const holder = document.getElementById('identity-prompts-editor');
-    if (!holder) return;
-    const prompts = this._identityPrompts || {};
-    const f = (filter || '').toLowerCase();
-    holder.innerHTML = Object.entries(prompts).filter(([p]) => !f || p.includes(f) || (this.PROVIDER_LABELS[p]||'').toLowerCase().includes(f)).map(([provider, text]) => {
-      const label = this.PROVIDER_LABELS[provider] || provider;
-      const isDefault = text === this._identityDefaults[provider];
-      return `
-        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--surface)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <code style="color:var(--accent);font-weight:600">${provider}</code>
-              <span class="text-sm text-muted">${label}</span>
-              ${isDefault ? '' : `<span class="text-xs" style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:3px">${I18n.t('card.custom')}</span>`}
-            </div>
-            <div class="btn-group">
-              <button class="btn btn-ghost btn-xs" onclick="App.resetIdentityPrompt('${provider}')" ${isDefault ? 'disabled' : ''}>${I18n.t('experimental.restoreDefault')}</button>
-              <button class="btn btn-primary btn-xs" onclick="App.saveIdentityPrompt('${provider}')">${I18n.t('experimental.save')}</button>
-            </div>
-          </div>
-          <textarea id="id-prompt-${provider}" class="input" rows="3" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.5">${this.esc(text)}</textarea>
-        </div>
-      `;
-    }).join('') || `<div class="text-muted text-sm">${I18n.t('experimental.noMatch')}</div>`;
-  },
-
-  filterIdentityPrompts(v) { this.renderIdentityPrompts(v); },
-
-  async saveIdentityPrompt(provider) {
-    const ta = document.getElementById(`id-prompt-${provider}`);
-    if (!ta) return;
-    const v = ta.value.trim();
-    if (!v) return this.toast(I18n.t('experimental.promptEmpty'), 'error');
-    if (!v.includes('{model}')) {
-      const ok = await this.confirm(I18n.t('experimental.missingPlaceholder'), I18n.t('experimental.missingPlaceholderDesc') || 'Save anyway?', { okText: I18n.t('button.save') });
-      if (!ok) return;
-    }
-    await this.api('PUT', '/identity-prompts', { [provider]: v });
-    this.toast(`${provider} ${I18n.t('toast.saved')}`, 'success');
-    this.loadExperimental();
-  },
-
-  async resetIdentityPrompt(provider) {
-    const ok = await this.confirm(I18n.t('experimental.restoreDefault'), `${provider} ${I18n.t('confirm.restoreDefaultDesc') || 'restore to default?'}`, { okText: I18n.t('experimental.restoreDefault') });
-    if (!ok) return;
-    await this.api('DELETE', `/identity-prompts/${provider}`);
-    this.toast(`${provider} ${I18n.t('experimental.restored') || 'restored'}`, 'success');
-    this.loadExperimental();
   },
 
   async saveSystemPrompt(key) {
