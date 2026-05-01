@@ -1654,12 +1654,31 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
       };
       serverUsage = chunks.usage || null;
       if (emulateTools) {
+        // Capture pre-parse text once for diagnostic logging — useful when
+        // non-Claude models emit a tool call in a format the parser missed.
+        // Sample only the first 240 chars to keep logs sane.
+        const rawTextHead = allText.slice(0, 240).replace(/\s+/g, ' ');
         const parsed = parseToolCallsFromText(allText, {
           modelKey,
           provider,
         });
         allText = parsed.text;
         toolCalls = parsed.toolCalls;
+        // Diagnostic: emulation was active and the model returned text but no
+        // recognized tool call. Surface tool-shaped substrings so we can see
+        // whether the model emitted an unsupported format (markdown-fenced
+        // JSON, OpenAI native function_call, natural-language "I'll call X")
+        // vs simply ignored the prompt and answered conversationally. Used to
+        // diagnose "tool_use never appears" reports — issue #109 sub2api E2E.
+        if (toolCalls.length === 0 && allText) {
+          const markers = [];
+          if (/<tool_call/i.test(allText)) markers.push('xml_tag');
+          if (/```\s*(?:json|tool_call)/i.test(allText)) markers.push('fenced_json');
+          if (/"function"\s*:|"tool_calls"\s*:|"function_call"\s*:/.test(allText)) markers.push('openai_native');
+          if (/\{\s*"name"\s*:\s*"[a-zA-Z0-9_-]+"\s*,\s*"arguments"/.test(allText)) markers.push('bare_json');
+          if (/^\s*(?:I'?ll|I will|Let me|I'?m going to)\s+(?:call|use|invoke|run)/im.test(allText)) markers.push('natural_lang');
+          log.info(`Chat[non-stream]: emulateTools=true but parser found 0 tool_calls (model=${modelKey} provider=${provider}); markers=${markers.join(',') || 'none'}; head="${rawTextHead}"`);
+        }
       } else {
         allText = stripToolMarkupFromText(allText);
       }
@@ -2195,6 +2214,19 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
                 const idx = collectedToolCalls.length;
                 collectedToolCalls.push(tc);
                 emitToolCallDelta(tc, idx);
+              }
+              // Diagnostic: same as nonStreamResponse but for the SSE path —
+              // surface why no tool_calls came out when emulation was active.
+              // See nonStreamResponse for marker rationale (#109 sub2api E2E).
+              if (emulateTools && collectedToolCalls.length === 0 && accText) {
+                const head = accText.slice(0, 240).replace(/\s+/g, ' ');
+                const markers = [];
+                if (/<tool_call/i.test(accText)) markers.push('xml_tag');
+                if (/```\s*(?:json|tool_call)/i.test(accText)) markers.push('fenced_json');
+                if (/"function"\s*:|"tool_calls"\s*:|"function_call"\s*:/.test(accText)) markers.push('openai_native');
+                if (/\{\s*"name"\s*:\s*"[a-zA-Z0-9_-]+"\s*,\s*"arguments"/.test(accText)) markers.push('bare_json');
+                if (/^\s*(?:I'?ll|I will|Let me|I'?m going to)\s+(?:call|use|invoke|run)/im.test(accText)) markers.push('natural_lang');
+                log.info(`Chat[stream]: emulateTools=true but parser found 0 tool_calls (model=${modelKey} provider=${provider}); markers=${markers.join(',') || 'none'}; head="${head}"`);
               }
             }
             emitContent(pathStreamText.flush());

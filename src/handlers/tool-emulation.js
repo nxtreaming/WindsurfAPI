@@ -1162,15 +1162,184 @@ export class ToolCallStreamParser {
 /**
  * Run a complete (non-streamed) text through the parser in one shot.
  * Convenience wrapper for the non-stream response path.
+ *
+ * If the primary parser finds no tool calls, runs a salvage pass that
+ * recognises common formats GPT/Gemini families emit when they ignore
+ * the XML protocol — markdown-fenced JSON, whitespace-tolerant bare
+ * JSON, OpenAI native `function_call` / `tool_calls` shapes. These
+ * salvage formats are NOT supported in the streaming path (they require
+ * full-text scanning); the streaming parser still expects the dialect
+ * we asked for. Salvage exists so /v1/messages with non-Claude models
+ * doesn't return text-only when the model emits a tool call we can
+ * recognise but didn't wrap correctly. Issue #109 sub2api E2E.
  */
 export function parseToolCallsFromText(text, options = {}) {
   const parser = new ToolCallStreamParser(options);
   const a = parser.feed(text);
   const b = parser.flush();
-  return {
+  const primary = {
     text: a.text + b.text,
     toolCalls: [...a.toolCalls, ...b.toolCalls],
   };
+  if (primary.toolCalls.length > 0 || !text) return primary;
+  // Salvage only runs when we'd otherwise return zero tool calls — never
+  // overrides the primary parser when it found something.
+  const salvaged = salvageToolCallsFromText(primary.text || text);
+  if (!salvaged.toolCalls.length) return primary;
+  log.info(`ToolParser: salvage recovered ${salvaged.toolCalls.length} tool_call(s) the primary parser missed (formats: ${salvaged.formats.join(',')})`);
+  return { text: salvaged.text, toolCalls: salvaged.toolCalls };
+}
+
+/**
+ * Salvage pass — scans full text for tool-call shapes GPT/Gemini commonly
+ * emit when they don't follow the XML protocol exactly:
+ *
+ *   1. Markdown-fenced JSON   ```json\n{"name":...,"arguments":{...}}\n```
+ *   2. OpenAI function_call   {"function_call":{"name":...,"arguments":"..."}}
+ *   3. OpenAI tool_calls      {"tool_calls":[{"function":{"name":...,"arguments":"..."}}]}
+ *   4. Whitespace-tolerant    {  "name" : "x" , "arguments" : { … } }
+ *
+ * Returns { text, toolCalls, formats[] }. text is the input with the
+ * salvaged shapes removed. formats[] is for diag logging.
+ */
+function salvageToolCallsFromText(text) {
+  if (typeof text !== 'string' || !text) return { text: text || '', toolCalls: [], formats: [] };
+  let working = text;
+  const calls = [];
+  const formats = new Set();
+  let seq = 0;
+  const newId = () => `call_salvage_${seq++}_${Date.now().toString(36)}`;
+
+  // 1. Markdown-fenced JSON. Tolerate ```json, ```tool_call, or bare ```.
+  //    Capture group 1 is the JSON body. Non-greedy to support multiple
+  //    fences in one response.
+  working = working.replace(/```(?:json|tool_call|tool|tool_use)?\s*\n([\s\S]*?)\n\s*```/gi, (match, body) => {
+    const parsed = safeParseJson(body.trim());
+    if (!parsed) return match;
+    // Single tool call shape: { name, arguments } or {function_call:{...}} or
+    // {tool_calls:[...]}.
+    const extracted = extractToolCallShapes(parsed);
+    if (!extracted.length) return match;
+    for (const tc of extracted) calls.push({ id: newId(), ...tc });
+    formats.add('fenced_json');
+    return '';
+  });
+
+  // 2. OpenAI native function_call / tool_calls JSON at top level (no fence).
+  //    Scan for `{"function_call"` or `{"tool_calls"` and try parsing the
+  //    enclosing JSON object.
+  for (const sentinel of ['{"function_call"', '{"tool_calls"', '{"function"']) {
+    let scanFrom = 0;
+    while (true) {
+      const idx = working.indexOf(sentinel, scanFrom);
+      if (idx === -1) break;
+      const end = matchClosingBrace(working, idx);
+      if (end === -1) { scanFrom = idx + 1; continue; }
+      const slice = working.slice(idx, end + 1);
+      const parsed = safeParseJson(slice);
+      if (!parsed) { scanFrom = idx + 1; continue; }
+      const extracted = extractToolCallShapes(parsed);
+      if (!extracted.length) { scanFrom = idx + 1; continue; }
+      for (const tc of extracted) calls.push({ id: newId(), ...tc });
+      formats.add(sentinel.includes('tool_calls') ? 'openai_tool_calls' : 'openai_function_call');
+      working = working.slice(0, idx) + working.slice(end + 1);
+      scanFrom = idx;
+    }
+  }
+
+  // 3. Whitespace-tolerant bare {"name":..., "arguments":...} — ONLY if the
+  //    strict parser hasn't already handled it. Look for `"name"` as a key
+  //    with optional whitespace and matching `"arguments"` key in the same
+  //    object. Reuses matchClosingBrace for proper bracket counting.
+  const bareNameRe = /\{\s*"name"\s*:/g;
+  let match;
+  while ((match = bareNameRe.exec(working)) !== null) {
+    const objStart = match.index;
+    const end = matchClosingBrace(working, objStart);
+    if (end === -1) continue;
+    const slice = working.slice(objStart, end + 1);
+    const parsed = safeParseJson(slice);
+    if (!parsed || typeof parsed.name !== 'string' || !('arguments' in parsed)) continue;
+    const args = typeof parsed.arguments === 'string'
+      ? parsed.arguments
+      : JSON.stringify(parsed.arguments ?? {});
+    calls.push({ id: newId(), name: parsed.name, argumentsJson: args });
+    formats.add('whitespace_bare_json');
+    working = working.slice(0, objStart) + working.slice(end + 1);
+    bareNameRe.lastIndex = objStart;
+  }
+
+  return {
+    text: calls.length ? working.trim() : text,
+    toolCalls: calls,
+    formats: [...formats],
+  };
+}
+
+/**
+ * Extract `{name, argumentsJson}` tool-call records from a parsed JSON value
+ * regardless of whether the model emitted the bare shape, OpenAI's
+ * function_call wrapper, or a tool_calls array.
+ */
+function extractToolCallShapes(parsed) {
+  if (!parsed || typeof parsed !== 'object') return [];
+  // Bare {name, arguments}
+  if (typeof parsed.name === 'string' && 'arguments' in parsed) {
+    const args = typeof parsed.arguments === 'string'
+      ? parsed.arguments
+      : JSON.stringify(parsed.arguments ?? {});
+    return [{ name: parsed.name, argumentsJson: args }];
+  }
+  // {function_call: {name, arguments}}  (OpenAI legacy)
+  // {function:     {name, arguments}}   (OpenAI tool_calls inner)
+  // Require `arguments` to be present — bare {"function":{"name":"x"}} without
+  // an arguments key is more likely a metadata field than a tool call. Codex
+  // review caught this as a false-positive risk on real GPT outputs.
+  for (const key of ['function_call', 'function']) {
+    const inner = parsed[key];
+    if (inner && typeof inner === 'object' && typeof inner.name === 'string' && 'arguments' in inner) {
+      const args = typeof inner.arguments === 'string'
+        ? inner.arguments
+        : JSON.stringify(inner.arguments ?? {});
+      return [{ name: inner.name, argumentsJson: args }];
+    }
+  }
+  // {tool_calls: [{function: {...}}, ...]}  (OpenAI native array)
+  if (Array.isArray(parsed.tool_calls)) {
+    const out = [];
+    for (const item of parsed.tool_calls) {
+      const fn = item?.function;
+      if (fn && typeof fn.name === 'string') {
+        const args = typeof fn.arguments === 'string'
+          ? fn.arguments
+          : JSON.stringify(fn.arguments ?? {});
+        out.push({ name: fn.name, argumentsJson: args });
+      }
+    }
+    return out;
+  }
+  return [];
+}
+
+/**
+ * Find the index of the `}` that closes the `{` at `start`, respecting
+ * strings and escapes. Returns -1 if no balancing brace exists.
+ */
+function matchClosingBrace(s, start) {
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\' && inStr) { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 export function stripToolMarkupFromText(text) {
