@@ -69,6 +69,19 @@ describe('v2.0.29 model catalog correctness', () => {
     assert.equal(getModelInfo('claude-opus-4-7-max')?.modelUid, 'claude-opus-4-7-max');
   });
 
+  // sub2api end-to-end test (v2.0.51) caught these — `gpt-5.2-medium` 400'd
+  // because the catalog only had bare `gpt-5.2`. Same shape for 5.4 (had tiers
+  // but no bare) and 5.3-codex (had bare but no -medium dotted alias).
+  it('cross-tier aliases resolve regardless of which side is canonical', () => {
+    assert.equal(resolveModel('gpt-5.2-medium'), 'gpt-5.2');
+    assert.equal(resolveModel('gpt-5-2-medium'), 'gpt-5.2');
+    assert.equal(resolveModel('gpt-5.4'), 'gpt-5.4-medium');
+    assert.equal(resolveModel('gpt-5.3-codex-medium'), 'gpt-5.3-codex');
+    assert.equal(resolveModel('gpt-5.2-codex'), 'gpt-5.2-codex-medium');
+    // Non-existent tier should still fall through to itself (not silently route)
+    assert.equal(resolveModel('gpt-5.2-notarealtier'), 'gpt-5.2-notarealtier');
+  });
+
   it('exposes gpt-5.3-codex tier ladder (low/high/xhigh + priority lane)', () => {
     assert.ok(getModelInfo('gpt-5.3-codex-low'));
     assert.ok(getModelInfo('gpt-5.3-codex-high'));

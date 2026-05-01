@@ -251,6 +251,16 @@ _lookup.set('gpt-5-4-mini-low', 'gpt-5.4-mini-low');
 _lookup.set('gpt-5-4-mini-medium', 'gpt-5.4-mini-medium');
 _lookup.set('gpt-5-4-mini-high', 'gpt-5.4-mini-high');
 _lookup.set('gpt-5-4-mini-xhigh', 'gpt-5.4-mini-xhigh');
+// Bare-tier aliases — clients commonly write the dotted form for the medium tier
+// even when the catalog uses bare-only or tier-only entries. Without these the
+// /v1/messages handler 400s "Unsupported model" before forwarding. #109 sub2api
+// reproducer was `gpt-5.2-medium` (bare gpt-5.2 = medium but the alias was missing).
+_lookup.set('gpt-5.2-medium', 'gpt-5.2');                  // bare gpt-5.2 IS the medium tier
+_lookup.set('gpt-5-2-medium', 'gpt-5.2');                  // cloud-format equivalent
+_lookup.set('gpt-5.2-codex', 'gpt-5.2-codex-medium');      // bare codex → medium
+_lookup.set('gpt-5-2-codex-medium', 'gpt-5.2-codex-medium');
+_lookup.set('gpt-5.3-codex-medium', 'gpt-5.3-codex');      // bare codex IS medium
+_lookup.set('gpt-5.4', 'gpt-5.4-medium');                  // bare → medium per family convention
 // gpt-5.5 cloud-format aliases (cloud sends `gpt-5-5-*`, OpenAI-style is `gpt-5.5-*`)
 _lookup.set('gpt-5-5', 'gpt-5.5');
 _lookup.set('gpt-5-5-none', 'gpt-5.5-none');
