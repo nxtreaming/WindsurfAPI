@@ -5,7 +5,7 @@
 
 import { createHash, randomUUID } from 'crypto';
 import { WindsurfClient, contentToString, isCascadeTransportError } from '../client.js';
-import { getApiKey, acquireAccountByKey, releaseAccount, getAccountAvailability, reportError, reportSuccess, markRateLimited, reportInternalError, updateCapability, getAccountList, isAllRateLimited, isAllTemporarilyUnavailable, refundReservation, looksLikeBanSignal, reportBanSignal, clearBanSignals } from '../auth.js';
+import { getApiKey, acquireAccountByKey, releaseAccount, getAccountAvailability, reportError, reportSuccess, markRateLimited, reportInternalError, updateCapability, getAccountList, isAllRateLimited, isAllTemporarilyUnavailable, refundReservation, looksLikeBanSignal, reportBanSignal, clearBanSignals, isModelBlockedByDrought, getDroughtSummary } from '../auth.js';
 import { resolveModel, getModelInfo } from '../models.js';
 import { getLsFor, ensureLs } from '../langserver.js';
 import { config, log } from '../config.js';
@@ -1310,6 +1310,37 @@ export async function handleChatCompletions(body, context = {}) {
         error: {
           message: `模型 ${displayModel} 已被 Windsurf 上游废弃，不再可用。建议切换到当前可用模型（如 gemini-2.5-flash、claude-haiku-4-5、claude-sonnet-4-6）。`,
           type: 'model_deprecated',
+        },
+      },
+    };
+  }
+
+  // v2.0.58 — drought mode + premium model gate. When every active
+  // account is below the weekly threshold AND the operator has the
+  // restriction enabled (default ON, toggleable from dashboard or env
+  // DROUGHT_RESTRICT_PREMIUM=0), refuse premium models with a clean
+  // 503 + retry-after instead of letting the request burn its way to
+  // an upstream rate-limit. Free-tier models (gemini-2.5-flash etc.)
+  // still go through.
+  if (isModelBlockedByDrought(routingModelKey)) {
+    const summary = getDroughtSummary();
+    const freeList = (summary.freeTierModels || []).slice(0, 4).join(', ') || 'gemini-2.5-flash';
+    const retryAfterSec = Math.max(60, Math.min(60 * 60 * 24, 60 * 30)); // hint 30 min by default
+    log.warn(`Chat[drought]: blocking premium model ${routingModelKey} (lowestWeekly=${summary.lowestWeeklyPercent}%, ${summary.knownAccounts}/${summary.activeAccounts} accounts known)`);
+    return {
+      status: 503,
+      headers: { 'Retry-After': String(retryAfterSec) },
+      body: {
+        error: {
+          message: `账号池处于配额低水位（drought mode）：所有账号本周配额都低于 ${summary.threshold}%，已暂时屏蔽 premium 模型 ${displayModel}。请改用免费层模型（${freeList}…），或等周配额重置。可在 Dashboard 实验性面板关闭 droughtRestrictPremium 强制下发（会消耗最后一点配额）。`,
+          type: 'drought_mode',
+          drought: {
+            lowestWeeklyPercent: summary.lowestWeeklyPercent,
+            lowestDailyPercent: summary.lowestDailyPercent,
+            threshold: summary.threshold,
+            activeAccounts: summary.activeAccounts,
+            allowedModels: summary.freeTierModels,
+          },
         },
       },
     };

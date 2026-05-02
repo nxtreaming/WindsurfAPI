@@ -27,6 +27,12 @@ const DEFAULTS = {
     // chat request. Reduces wasted attempts when the account has no message
     // capacity. Adds one network round-trip per attempt so off by default.
     preflightRateLimit: false,
+    // v2.0.58 — Drought mode: when every active account has weekly% < 5,
+    // block premium models from routing (free-tier models still go
+    // through). Default ON so the proxy stops burning upstream calls
+    // that would 429 anyway. Can be turned off if operator prefers
+    // graceful degradation over hard refusal.
+    droughtRestrictPremium: true,
   },
   // System-level prompt templates injected into Cascade proto fields.
   // Editable from Dashboard so users can tune without code changes.
@@ -263,5 +269,10 @@ export function getEffectiveDashboardPasswordStored() {
 // time after `load()` so the file-backed value is honoured immediately.
 import('./auth.js').then(m => {
   if (typeof m.setApiKeyResolver === 'function') m.setApiKeyResolver(getEffectiveApiKey);
+  // v2.0.58: same hook for drought-mode premium restriction so toggling
+  // the flag from the dashboard takes effect without a restart.
+  if (typeof m.setDroughtRestrictResolver === 'function') {
+    m.setDroughtRestrictResolver(() => isExperimentalEnabled('droughtRestrictPremium'));
+  }
 }).catch(() => { /* auth not yet ready, validateApiKey falls back to env */ });
 

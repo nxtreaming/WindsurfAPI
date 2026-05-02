@@ -1935,6 +1935,14 @@ window._firebaseOAuth = async function(provider) {
             <div class="text-sm text-mute" data-zh="默认关闭。开启后立即生效。" data-en="Off by default. Takes effect immediately.">默认关闭。开启后立即生效。</div>
           </div>
         </div>
+        <!-- v2.0.58 — drought-mode premium gate toggle -->
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;padding-top:14px;border-top:1px dashed var(--rule-faint)">
+          <label class="switch"><input type="checkbox" id="exp-drought-restrict" onchange="App.toggleExperimental('droughtRestrictPremium', this.checked)"><span class="switch-slider"></span></label>
+          <div>
+            <div style="font-weight:500" data-zh="drought 时屏蔽 premium 模型" data-en="Block premium models during drought">drought 时屏蔽 premium 模型</div>
+            <div class="text-sm text-mute" data-zh="所有账号本周配额都 < 5% 时对 premium 模型请求返 503，避免烧最后配额。免费层模型（gemini-2.5-flash 等）保持可用。" data-en="Refuse premium models with 503 when every account is below 5% weekly so the last quota isn't burned on a 429. Free-tier models still go through.">所有账号本周配额都 < 5% 时对 premium 模型请求返 503，避免烧最后配额。</div>
+          </div>
+        </div>
         <div class="metrics-grid" id="exp-pool-cards" style="margin:0;border:1.5px solid var(--rule-faint)"></div>
         <div class="field-row-actions">
           <button class="btn btn-ghost btn-sm" onclick="App.clearConversationPool()">clear pool</button>

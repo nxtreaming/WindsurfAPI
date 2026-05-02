@@ -252,6 +252,12 @@
       "title": "凭证管理",
       "desc": "运行时改 API_KEY 和 Dashboard 密码，写入 runtime-config.json 立即生效，不用重启容器或重读 .env。改完之后下一次请求需要用新值；当前会话会要求重新登录。"
     },
+    "droughtRestrict": {
+      "title": "配额低水位时屏蔽 premium 模型",
+      "desc": "所有账号本周配额都低于 5% 时，对 premium 模型（claude-opus / claude-sonnet 等）请求直接返 503，避免上游 rate-limit 烧最后一点配额。免费层模型（gemini-2.5-flash 等）保持可用。关闭后即使在 drought mode 也照常下发，accept 上游可能立即 429。",
+      "enable": "启用 drought-mode premium 屏蔽",
+      "hint": "默认开启。drought 状态由账号池自动判定（GET /dashboard/api/drought 看实时值）。"
+    },
     "skin": {
       "title": "界面风格",
       "desc": "控制台外观。默认现代风；手绘草稿风是实验性简化布局。切换后页面会刷新。"

@@ -2179,6 +2179,24 @@ window._firebaseOAuth = async function(provider) {
     </div>
     <div class="section" style="margin-top:24px">
       <div class="section-header">
+        <div class="section-title" data-i18n="section.droughtRestrict.title">配额低水位时屏蔽 premium 模型</div>
+      </div>
+      <div class="section-body">
+        <div class="section-desc" style="margin-bottom:12px" data-i18n="section.droughtRestrict.desc">所有账号本周配额都低于 5% 时，对 premium 模型（claude-opus / claude-sonnet 等）请求直接返 503，避免上游 rate-limit 烧最后一点配额。免费层模型（gemini-2.5-flash 等）保持可用。关闭后即使在 drought mode 也照常下发，accept 上游可能立即 429。</div>
+        <div style="display:flex;align-items:center;gap:16px;padding:12px;background:var(--surface-2);border-radius:var(--radius)">
+          <label class="switch">
+            <input type="checkbox" id="exp-drought-restrict" onchange="App.toggleExperimental('droughtRestrictPremium', this.checked)">
+            <span class="switch-slider"></span>
+          </label>
+          <div>
+            <div style="font-weight:500" data-i18n="section.droughtRestrict.enable">启用 drought-mode premium 屏蔽</div>
+            <div class="text-sm text-muted" data-i18n="section.droughtRestrict.hint">默认开启。drought 状态由账号池自动判定（GET /dashboard/api/drought 看实时值）。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
         <div>
           <div class="section-title" data-i18n="section.systemPrompts.title">系统提示词</div>
           <div class="section-desc" data-i18n="section.systemPrompts.desc">工具注入、对话模式等内置提示词模板。修改后立即生效，点"重置"恢复默认。</div>
@@ -4991,6 +5009,9 @@ const App = {
     const d = await this.api('GET', '/experimental');
     const cb = document.getElementById('exp-cascade-reuse');
     if (cb) cb.checked = !!d.flags?.cascadeConversationReuse;
+    // v2.0.58 — drought-mode premium gate toggle.
+    const cbDrought = document.getElementById('exp-drought-restrict');
+    if (cbDrought) cbDrought.checked = !!d.flags?.droughtRestrictPremium;
     // Reflect current skin cookie in the dropdown so reload state is visible.
     const skinSel = document.getElementById('skin-select');
     if (skinSel) {

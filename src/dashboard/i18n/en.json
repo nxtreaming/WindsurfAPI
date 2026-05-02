@@ -252,6 +252,12 @@
       "title": "Credentials",
       "desc": "Rotate API_KEY and the dashboard password at runtime. Saved into runtime-config.json and applied immediately — no container restart or .env reload needed. Next request must use the new value; the current session will be asked to re-login."
     },
+    "droughtRestrict": {
+      "title": "Block premium models during drought",
+      "desc": "When every active account is below 5% weekly quota, premium model requests (claude-opus / claude-sonnet etc.) are refused with a clean 503 instead of burning the last bit of quota on an upstream 429. Free-tier models (gemini-2.5-flash etc.) still go through. Disable to forward premium requests anyway and accept the upstream rate-limit.",
+      "enable": "Enable drought-mode premium block",
+      "hint": "Default ON. Drought state is auto-detected from the account pool (GET /dashboard/api/drought for live state)."
+    },
     "skin": {
       "title": "Interface Style",
       "desc": "Dashboard appearance. Modern is the default; sketch is an experimental simplified layout. The page refreshes after switching."

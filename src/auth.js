@@ -90,6 +90,47 @@ export function isDroughtMode() {
   return droughtCount === knownCount;
 }
 
+// v2.0.58 — drought-mode premium-model gate. Default ON (changes
+// behaviour but drought is exceptional, and operators reported wanting
+// the proxy to stop wasting upstream calls when no quota remains).
+// Toggle via env DROUGHT_RESTRICT_PREMIUM=0 to disable globally, or via
+// the dashboard experimental flag `droughtRestrictPremium` (which the
+// chat path reads through runtime-config).
+function _droughtRestrictEnvDefault() {
+  return process.env.DROUGHT_RESTRICT_PREMIUM !== '0';
+}
+
+export function isDroughtRestrictEnabled() {
+  // env override wins; otherwise consult runtime-config (deferred import
+  // to avoid the same load-order issue documented in validateApiKey).
+  if (process.env.DROUGHT_RESTRICT_PREMIUM === '0') return false;
+  if (process.env.DROUGHT_RESTRICT_PREMIUM === '1') return true;
+  // No explicit env → use runtime-config default (true).
+  if (_droughtRestrictResolver) {
+    try { return !!_droughtRestrictResolver(); } catch { /* fall through */ }
+  }
+  return _droughtRestrictEnvDefault();
+}
+
+let _droughtRestrictResolver = null;
+export function setDroughtRestrictResolver(fn) {
+  _droughtRestrictResolver = typeof fn === 'function' ? fn : null;
+}
+
+/**
+ * True when drought mode is active AND the operator has restriction
+ * enabled AND the requested model is NOT in the free-tier allowlist.
+ * Free-tier models keep running because they don't burn weekly quota
+ * the way premium models do.
+ */
+export function isModelBlockedByDrought(modelKey) {
+  if (!modelKey) return false;
+  if (!isDroughtRestrictEnabled()) return false;
+  if (!isDroughtMode()) return false;
+  const freeModels = new Set(getTierModels('free'));
+  return !freeModels.has(modelKey);
+}
+
 export function getDroughtSummary() {
   const eligible = accounts.filter(a => a.status === 'active');
   let lowestWeekly = null;
@@ -113,6 +154,8 @@ export function getDroughtSummary() {
     knownAccounts,
     lowestWeeklyPercent: lowestWeekly,
     lowestDailyPercent: lowestDaily,
+    restrictEnabled: isDroughtRestrictEnabled(),
+    freeTierModels: getTierModels('free'),
   };
 }
 
