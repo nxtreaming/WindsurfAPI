@@ -4236,13 +4236,16 @@ const App = {
   statsChartType: 'bar',
   statsMetrics: { requests: true, success: true, errors: true },
   _lastStatsData: null,
-  // Softer, more cohesive palette — indigo / emerald / rose
+  // v2.0.59 — warmer, less saturated palette. Old indigo/emerald/rose
+  // read as "alarming" against the dark plot background; the new tones
+  // are still readable but feel calmer (warm amber for requests, soft
+  // teal-mint for success, dusty coral for errors).
   _chartColors: {
-    requests: '#818cf8',   // indigo-400
-    success:  '#34d399',   // emerald-400
-    errors:   '#fb7185',   // rose-400
+    requests: '#e0b482',   // warm amber
+    success:  '#7cc8a6',   // soft teal-mint
+    errors:   '#e08a8a',   // dusty coral
   },
-  _pieColors: ['#818cf8', '#34d399', '#fb7185', '#fbbf24', '#60a5fa', '#c084fc', '#22d3ee', '#f472b6'],
+  _pieColors: ['#e0b482', '#7cc8a6', '#e08a8a', '#f5d491', '#9bb8d4', '#c9a6cf', '#84c5c9', '#dda5b3'],
 
   setStatsRange(value) {
     this.statsRange = value;
@@ -4388,11 +4391,44 @@ const App = {
     }));
     if (this.statsRange === 'custom' && this.statsCustomRange) {
       const { start, end } = this.statsCustomRange;
-      return all.filter(b => b.t >= start.getTime() && b.t <= end.getTime());
+      const inRange = all.filter(b => b.t >= start.getTime() && b.t <= end.getTime());
+      return this._padTimeline(inRange, start.getTime(), end.getTime());
     }
     if (this.statsRange === 'all' || this.statsRange === -1) return all;
+    // v2.0.59 — fixed-window ranges (6h/24h/7d/30d) now backfill missing
+    // hours with zero buckets so the chart timeline stays continuous.
+    // Without this, only hours with traffic show as bars — making 24h
+    // look like "6 pts" with huge gaps when traffic is sparse.
     const n = Number(this.statsRange);
-    return all.slice(-n);
+    if (!Number.isFinite(n) || n <= 0) return all.slice(-n);
+    const endMs = Math.floor(Date.now() / 3600_000) * 3600_000;
+    const startMs = endMs - (n - 1) * 3600_000;
+    return this._padTimeline(all.filter(b => b.t >= startMs && b.t <= endMs), startMs, endMs);
+  },
+
+  // Generate a contiguous hourly timeline between [startMs, endMs] (both
+  // inclusive, hour-aligned) and zero-fill any hour the backend didn't
+  // emit a bucket for. Keeps the bar chart visually rhythmic when traffic
+  // is sparse — empty bars render as flat baseline ticks instead of huge
+  // visible gaps that read as "broken chart".
+  _padTimeline(present, startMs, endMs) {
+    const map = new Map();
+    for (const b of present) map.set(Math.floor(b.t / 3600_000) * 3600_000, b);
+    const out = [];
+    const startHour = Math.floor(startMs / 3600_000) * 3600_000;
+    const endHour = Math.floor(endMs / 3600_000) * 3600_000;
+    for (let t = startHour; t <= endHour; t += 3600_000) {
+      const hit = map.get(t);
+      if (hit) { out.push(hit); continue; }
+      out.push({
+        hour: new Date(t).toISOString(),
+        t,
+        requests: 0,
+        errors: 0,
+        success: 0,
+      });
+    }
+    return out;
   },
 
   // Aggregate contiguous buckets so the chart stays readable when we have
@@ -4640,11 +4676,17 @@ const App = {
       const barW = Math.max(2, slotW - gap);
       buckets.forEach((b, i) => {
         const v = b.requests;
-        if (v === 0) return;
-        const h = (v / maxY) * cH * p; // animate height
+        const x = xAt(i) - barW / 2;
+        // v2.0.59 — render a 1px baseline tick for empty hours so the
+        // timeline has visible rhythm even when traffic is sparse.
+        if (v === 0) {
+          ctx.fillStyle = 'rgba(255,255,255,.08)';
+          ctx.fillRect(x, base - 1, barW, 1);
+          return;
+        }
+        const h = (v / maxY) * cH * p;
         const errRatio = v > 0 ? b.errors / v : 0;
         const color = this._errorTintedColor(errRatio);
-        const x = xAt(i) - barW / 2;
         const y = base - h;
         const grad = ctx.createLinearGradient(0, y, 0, y + h);
         grad.addColorStop(0, color);
@@ -4666,6 +4708,15 @@ const App = {
       const barW = Math.max(2, slotW - gap);
       buckets.forEach((b, i) => {
         const cx = xAt(i);
+        // v2.0.59 — baseline tick for empty hours so the chart looks
+        // continuous even when traffic is sparse (24h with 6 active
+        // hours used to render as huge gaps).
+        if ((m.success ? b.success : 0) + (m.errors ? b.errors : 0) === 0
+            && (m.requests ? b.requests : 0) === 0) {
+          ctx.fillStyle = 'rgba(255,255,255,.08)';
+          ctx.fillRect(cx - barW / 2, base - 1, barW, 1);
+          return;
+        }
         let stackV = 0;
         const segments = [];
         if (m.success && b.success > 0) segments.push({ v: b.success, color: this._chartColors.success });
