@@ -33,6 +33,23 @@ const DEFAULTS = {
     // that would 429 anyway. Can be turned off if operator prefers
     // graceful degradation over hard refusal.
     droughtRestrictPremium: true,
+    // v2.0.67 (#112) — Auto-pull docker self-update during traffic lulls.
+    // When ON the proxy watches per-minute request rate; if it stays
+    // under `autoUpdateQuietWindow.thresholdRequests` for the full
+    // `windowMinutes` window, runs the existing docker self-update
+    // flow (pulls latest image + spawns deployer sidecar to recreate
+    // the container). Default OFF — only useful for self-hosted boxes
+    // that mount /var/run/docker.sock and run via docker-compose.
+    autoUpdateQuietWindow: false,
+  },
+  // v2.0.67 (#112) — Tunables for the quiet-window auto-updater.
+  // Not under `experimental` because they're not boolean flags.
+  // Keys correspond 1:1 with src/dashboard/quiet-window-updater.js DEFAULTS.
+  autoUpdateQuietWindow: {
+    windowMinutes: 5,
+    thresholdRequests: 5,
+    cooldownHours: 24,
+    coldStartGraceMs: 600000,
   },
   // System-level prompt templates injected into Cascade proto fields.
   // Editable from Dashboard so users can tune without code changes.

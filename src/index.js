@@ -11,6 +11,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { VERSION, BRAND } from './version.js';
 import { abortActiveSse } from './sse-registry.js';
+import { startQuietWindowAutoUpdate, stopQuietWindowAutoUpdate } from './dashboard/quiet-window-updater.js';
 export { VERSION, BRAND };
 
 function workspaceBase() {
@@ -118,6 +119,12 @@ async function main() {
 
   const server = startServer();
 
+  // v2.0.67 (#112) — quiet-window auto-update watcher. No-op until the
+  // operator flips experimental.autoUpdateQuietWindow on (default off).
+  // Runs alongside the HTTP server; ticks every minute, polls the request
+  // ring + cooldown gates, fires runDockerSelfUpdate during real lulls.
+  try { startQuietWindowAutoUpdate(); } catch (e) { log.warn(`quiet-window: failed to start: ${e.message}`); }
+
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -133,12 +140,14 @@ async function main() {
       // counts, rate-limit cooldowns) before PM2 restarts us. Debounced
       // saves would otherwise be killed by the exit below.
       try { saveAccountsSync(); } catch {}
+      try { stopQuietWindowAutoUpdate(); } catch {}
       try { stopLanguageServer(); } catch {}
       process.exit(0);
     });
     setTimeout(() => {
       log.warn('Drain timeout, forcing exit');
       try { saveAccountsSync(); } catch {}
+      try { stopQuietWindowAutoUpdate(); } catch {}
       try { stopLanguageServer(); } catch {}
       process.exit(0);
     }, 30_000);

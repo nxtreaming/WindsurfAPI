@@ -36,6 +36,11 @@ import { assertPublicUrlHost } from '../image.js';
 import { validateHostFormat } from '../net-safety.js';
 import { discoverWindsurfCredentials, isLoopbackAddress } from './local-windsurf.js';
 import { detectDockerSelfUpdate, runDockerSelfUpdate } from './docker-self-update.js';
+import {
+  getStatus as getQuietWindowStatus,
+  setEnabled as setQuietWindowEnabled,
+  _runOneTick as runQuietWindowTickNow,
+} from './quiet-window-updater.js';
 
 export function parseProxyUrl(proxy) {
   const proxyParts = String(proxy).match(/^(?:(\w+):\/\/)?(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$/);
@@ -267,6 +272,27 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       return json(res, 200, { ok: true, ...result, latencyMs: Date.now() - startTime });
     } catch (err) {
       return json(res, 200, { ok: false, error: err.message, latencyMs: Date.now() - startTime });
+    }
+  }
+
+  // ─── v2.0.67 (#112) — Quiet-window auto-update ────────
+  if (subpath === '/auto-update/quiet-window' && method === 'GET') {
+    return json(res, 200, { ok: true, ...getQuietWindowStatus() });
+  }
+  if (subpath === '/auto-update/quiet-window' && method === 'PUT') {
+    const enabled = !!body?.enabled;
+    return json(res, 200, { ok: true, ...setQuietWindowEnabled(enabled) });
+  }
+  if (subpath === '/auto-update/quiet-window/run' && method === 'POST') {
+    // Force one tick now (operator wants to test the path without
+    // waiting for the next minute boundary). Honours the same gates as
+    // the periodic tick — disabled / cold-start / cooldown / busy will
+    // still short-circuit.
+    try {
+      const result = await runQuietWindowTickNow();
+      return json(res, 200, { ok: true, result });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
     }
   }
 

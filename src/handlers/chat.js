@@ -10,6 +10,7 @@ import { resolveModel, getModelInfo } from '../models.js';
 import { getLsFor, ensureLs } from '../langserver.js';
 import { config, log } from '../config.js';
 import { recordRequest } from '../dashboard/stats.js';
+import { markRequest as markQuietWindowRequest } from '../dashboard/quiet-window-updater.js';
 import { isModelAllowed } from '../dashboard/model-access.js';
 import { cacheKey, cacheGet, cacheSet } from '../cache.js';
 import { isExperimentalEnabled } from '../runtime-config.js';
@@ -1098,6 +1099,11 @@ export function mergeReasoningEffortIntoModel(reqModel, body) {
 
 export async function handleChatCompletions(body, context = {}) {
   const reqId = Math.random().toString(36).slice(2, 8);
+  // v2.0.67 (#112): feed the quiet-window auto-updater. Cheap (one
+  // timestamp push); covers /v1/chat/completions, /v1/messages and
+  // /v1/responses since both messages.js and responses.js go through
+  // handleChatCompletions.
+  markQuietWindowRequest();
   const {
     stream = false,
     max_tokens,
