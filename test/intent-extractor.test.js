@@ -119,6 +119,28 @@ describe('Layer 3 — natural narrative (live GLM-4.7 reproducer)', () => {
     );
     assert.equal(r.length, 0);
   });
+
+  // v2.0.76 follow-up — caught in v2.0.75 e2e probe against glm-4.7.
+  // GLM emitted "...with command 'command'" (the literal word) which
+  // made the regex bind value="command". Filter placeholder values.
+  it("rejects placeholder values ('command' / 'argument' / 'input' / etc.)", () => {
+    const r = extractIntentFromNarrative(
+      "I'll call shell_exec with command 'command'.",
+      [SHELL_TOOL], ACTIONABLE,
+    );
+    assert.equal(r.length, 0);
+  });
+
+  it("dedupes when narrative says the real command then echoes 'with command command'", () => {
+    // Real GLM-4.7 v2.0.75 probe pattern that produced 2 tool_calls,
+    // one valid and one bogus. Now should produce just 1.
+    const r = extractIntentFromNarrative(
+      `I'll call shell_exec with command 'echo HELLO'. The user wants me to use the shell_exec function with command 'command' as the parameter name.`,
+      [SHELL_TOOL], ACTIONABLE,
+    );
+    assert.equal(r.length, 1);
+    assert.deepEqual(JSON.parse(r[0].argumentsJson), { command: 'echo HELLO' });
+  });
 });
 
 describe('robustness', () => {

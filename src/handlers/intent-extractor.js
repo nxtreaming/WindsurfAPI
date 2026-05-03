@@ -205,6 +205,17 @@ function extractLayer3(text, names, primaryParam) {
         if (a && a[1]) { value = a[1].trim(); break; }
       }
       if (!value) continue;
+      // v2.0.76 (#120 GLM-4.7 false positive seen in v2.0.75 e2e probe):
+      // model output sometimes contains the param keyword echoed inline
+      // e.g. "...with command 'command'", which made the regex capture
+      // the literal word "command" as the value. Reject when value is
+      // just the param keyword itself (or another generic placeholder).
+      const PLACEHOLDER_VALUES = new Set([
+        'command', 'argument', 'arguments', 'param', 'parameter',
+        'parameters', 'input', 'value', 'file_path', 'filepath', 'path',
+        'query', 'string', 'text', 'name', 'arg',
+      ]);
+      if (PLACEHOLDER_VALUES.has(value.toLowerCase())) continue;
       const param = primaryParam.get(fn) || 'input';
       out.push({
         name: fn,
