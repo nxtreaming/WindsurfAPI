@@ -439,6 +439,36 @@ const EFFORT_LADDER = [
 ];
 const CONTEXT_LADDER = ['1m']; // 1m context variants are weekly-quota'd
 
+// v2.0.89 (audit follow-up to v2.0.88 H-1.5): cascade pool alias
+// fingerprint relies on `toolPreamble` being IDENTICAL between the
+// stored fpAfterAlias and the next-turn fpBefore. toolPreamble depends
+// on the dialect picked for (modelKey, provider, route). Inside one
+// provider the dialect normally stays the same, so the alias slot
+// fingerprint matches the next-turn lookup. But a cross-provider
+// fallback (e.g. anthropic claude-opus → openai gpt-5.5) would build
+// the alias slot with the gpt_native dialect's toolPreamble while the
+// next turn rebuilds with claude's dialect → silent fingerprint
+// mismatch → cascade reuse miss → model "forgets" prior turns again,
+// regressing the v2.0.87 fix that the v2.0.88 alias write was meant
+// to enforce.
+//
+// Today the EFFORT_LADDER and CONTEXT_LADDER walk only ever stays
+// inside the same base model name (claude-opus-4-7-* siblings are all
+// anthropic; codex max-* are all openai). But this is fragile —
+// future catalog edits could produce a cross-provider candidate by
+// accident. Add a hard guard: only return a fallback that has the
+// same `provider` as the original.
+function _isSameProviderFallback(originalKey, candidateKey) {
+  const o = MODELS[originalKey];
+  const c = MODELS[candidateKey];
+  if (!o || !c) return false;
+  // No provider on either side → conservatively allow (matches old
+  // behaviour for entries that haven't been catalogued with provider
+  // metadata, though all current entries do have provider).
+  if (!o.provider || !c.provider) return true;
+  return o.provider === c.provider;
+}
+
 export function pickRateLimitFallback(modelKey) {
   if (!modelKey || typeof modelKey !== 'string') return null;
   // Try effort suffix first (e.g. -max → -xhigh → -high → -medium → -low)
@@ -446,10 +476,12 @@ export function pickRateLimitFallback(modelKey) {
     const suffix = `-${EFFORT_LADDER[i]}`;
     if (modelKey.endsWith(suffix)) {
       const base = modelKey.slice(0, -suffix.length);
-      // Walk DOWN the ladder until we find a key actually in the catalog.
+      // Walk DOWN the ladder until we find a key actually in the catalog
+      // AND from the same provider (cascade pool alias requires same
+      // dialect → same toolPreamble → same fingerprint).
       for (let j = i - 1; j >= 0; j--) {
         const candidate = `${base}-${EFFORT_LADDER[j]}`;
-        if (MODELS[candidate]) return candidate;
+        if (MODELS[candidate] && _isSameProviderFallback(modelKey, candidate)) return candidate;
       }
     }
   }
@@ -458,7 +490,7 @@ export function pickRateLimitFallback(modelKey) {
     const dashed = `-${suffix}`;
     if (modelKey.endsWith(dashed)) {
       const candidate = modelKey.slice(0, -dashed.length);
-      if (MODELS[candidate]) return candidate;
+      if (MODELS[candidate] && _isSameProviderFallback(modelKey, candidate)) return candidate;
     }
   }
   // -thinking variants don't have a simple ladder; the natural fallback
