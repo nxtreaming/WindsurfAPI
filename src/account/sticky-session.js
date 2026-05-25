@@ -103,6 +103,7 @@ export function isStickyEnabled() {
  * @returns {{ accountId: string, apiKey: string } | null}
  */
 export function getStickyBinding(callerKey, modelKey = '') {
+  log.info('[sticky] ENTER callerKey=%s model=%s enabled=%s', (callerKey || '(none)').slice(0, 50), modelKey, ENABLED);
   if (!ENABLED) return null;
   if (!callerKey) { log.info('[sticky] SKIP (no callerKey) model=%s', modelKey); return null; }
   ensureCleanupTimer();
