@@ -103,14 +103,15 @@ export function isStickyEnabled() {
  * @returns {{ accountId: string, apiKey: string } | null}
  */
 export function getStickyBinding(callerKey, modelKey = '') {
-  if (!ENABLED || !callerKey) return null;
+  if (!ENABLED) return null;
+  if (!callerKey) { log.info('[sticky] SKIP (no callerKey) model=%s', modelKey); return null; }
   ensureCleanupTimer();
 
   const key = bindingKey(callerKey, modelKey);
   const binding = _bindings.get(key);
   if (!binding) {
     _stats.misses++;
-    if (callerKey.includes(':user:')) log.info('[sticky] MISS key=%s', key);
+    log.info('[sticky] MISS key=%s model=%s', key, modelKey);
     return null;
   }
 
@@ -123,7 +124,7 @@ export function getStickyBinding(callerKey, modelKey = '') {
 
   binding.lastAccess = now;
   _stats.hits++;
-  if (callerKey.includes(':user:')) log.info('[sticky] HIT key=%s account=%s', key, binding.accountId);
+  log.info('[sticky] HIT key=%s account=%s', key, binding.accountId);
   return { accountId: binding.accountId, apiKey: binding.apiKey };
 }
 
@@ -168,7 +169,7 @@ export function setStickyBinding(callerKey, modelKey, accountId, apiKey) {
 
   if (!existing) {
     _stats.creates++;
-    if (callerKey.includes(':user:')) log.info('[sticky] SET key=%s account=%s', key, accountId);
+    log.info('[sticky] SET key=%s account=%s', key, accountId);
   }
 }
 
@@ -182,7 +183,7 @@ export function setStickyBinding(callerKey, modelKey, accountId, apiKey) {
 export function clearStickyBinding(callerKey, modelKey = '') {
   if (!ENABLED || !callerKey) return;
   const key = bindingKey(callerKey, modelKey);
-  if (_bindings.has(key) && callerKey.includes(':user:')) log.info('[sticky] CLEAR key=%s', key);
+  if (_bindings.has(key)) log.info('[sticky] CLEAR key=%s', key);
   _bindings.delete(key);
 }
 
