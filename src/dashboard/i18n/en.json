@@ -261,6 +261,18 @@
       "enable": "Enable quiet-window auto-update",
       "hint": "Off by default. Current status: "
     },
+    "stickyByUser": {
+      "title": "Sticky session per-user binding",
+      "desc": "When enabled, the same user is always bound to the same upstream account regardless of model. When off, binding uses (user, model) pairs — different models may land on different accounts (useful when accounts have model-specific restrictions). Requires STICKY_SESSION_ENABLED=1.",
+      "enable": "Ignore model dimension",
+      "hint": "Off by default. When on, user_a's opus/haiku/gemini all share a single binding."
+    },
+    "stickyNoFallback": {
+      "title": "Sticky session no-fallback",
+      "desc": "When enabled, if the account bound by sticky session hits a rate limit, error, or model unavailability, the proxy will NOT fall back to another account in the pool — the error is returned directly to the client. This ensures each user strictly consumes only their bound account's quota. Requires STICKY_SESSION_ENABLED=1.",
+      "enable": "Disable account fallback",
+      "hint": "Off by default. When on, a bound account failure won't consume other accounts' quota."
+    },
     "droughtRestrict": {
       "title": "Block premium models during drought",
       "desc": "When every active account is below 5% weekly quota, premium model requests (claude-opus / claude-sonnet etc.) are refused with a clean 503 instead of burning the last bit of quota on an upstream 429. Free-tier models (gemini-2.5-flash etc.) still go through. Disable to forward premium requests anyway and accept the upstream rate-limit.",
