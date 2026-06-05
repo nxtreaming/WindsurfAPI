@@ -68,11 +68,42 @@ function countRepeatedMessageFields(fields, num) {
   return getAllFields(fields, num).filter(f => f.wireType === 2).length;
 }
 
+const NATIVE_TOOL_CONFIG_FIELDS = new Map([
+  [5, 'find'],
+  [8, 'run_command'],
+  [10, 'view_file'],
+  [19, 'list_dir'],
+  [33, 'grep_v2'],
+]);
+
+function summarizeNativeToolSubconfig(fields, num) {
+  const f = getField(fields, num, 2);
+  if (!f) return null;
+  let children = [];
+  try {
+    children = parseFields(f.value).map(child => ({
+      field: child.field,
+      wireType: child.wireType,
+      bytes: Buffer.isBuffer(child.value) ? child.value.length : undefined,
+    }));
+  } catch {}
+  return {
+    field: num,
+    kind: NATIVE_TOOL_CONFIG_FIELDS.get(num) || `field_${num}`,
+    bytes: f.value.length,
+    fieldNumbers: children.map(child => child.field),
+    fields: children,
+  };
+}
+
 function summarizeNativeToolConfig(toolCfgBuf) {
   const fields = parseFields(toolCfgBuf);
-  const subconfigFields = [5, 8, 10, 19, 33].filter(num => !!getField(fields, num, 2));
+  const subconfigs = [...NATIVE_TOOL_CONFIG_FIELDS.keys()]
+    .map(num => summarizeNativeToolSubconfig(fields, num))
+    .filter(Boolean);
   return {
-    subconfigFields,
+    subconfigFields: subconfigs.map(s => s.field),
+    subconfigs,
     allowlist: getAllFields(fields, 32)
       .filter(f => f.wireType === 2)
       .map(f => f.value.toString('utf8')),

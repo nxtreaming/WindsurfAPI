@@ -16,6 +16,10 @@ import {
   decodeCascadeStepToToolCall,
   nativeAllowlistNameForTool,
 } from '../src/cascade-native-bridge.js';
+import {
+  getNativeBridgeStats,
+  resetNativeBridgeStats,
+} from '../src/native-bridge-stats.js';
 
 const createdAccountIds = [];
 
@@ -432,6 +436,7 @@ describe('native mapped-tool routing', () => {
   });
 
   it('stream native bridge converts provider-native XML before content is emitted', async () => {
+    resetNativeBridgeStats();
     process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE = 'all_mapped';
     delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_OFF;
     const account = addAccountByKey(`native-stream-${Date.now()}-${Math.random().toString(36).slice(2)}`, 'native-stream');
@@ -481,5 +486,12 @@ describe('native mapped-tool routing', () => {
     assert.match(toolDeltas.map(t => t.function.arguments || '').join(''), /README\.md/);
     const finish = frames.flatMap(f => f.choices || []).find(c => c.finish_reason);
     assert.equal(finish.finish_reason, 'tool_calls');
+
+    const stats = getNativeBridgeStats();
+    assert.equal(stats.requests, 1);
+    assert.equal(stats.providerXmlToolCalls, 1);
+    assert.equal(stats.emittedToolCalls, 1);
+    assert.equal(stats.requestedByTool.Read, 1);
+    assert.equal(stats.emittedByTool.Read, 1);
   });
 });

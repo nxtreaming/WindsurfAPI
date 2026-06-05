@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { grpcFrame } from '../src/grpc.js';
-import { writeMessageField, writeStringField, writeVarintField } from '../src/proto.js';
+import { writeBoolField, writeMessageField, writeStringField, writeVarintField } from '../src/proto.js';
 import { buildSendCascadeMessageRequest } from '../src/windsurf.js';
 import {
   _resetProtoTraceForTests,
@@ -103,6 +103,40 @@ describe('proto trace', () => {
     assert.equal(rec.semantic.hasNativeToolConfig, true);
     assert.deepEqual(rec.semantic.nativeToolConfig.allowlist, ['read_file', 'run_command', 'grep_v2', 'list_dir']);
     assert.deepEqual(rec.semantic.nativeToolConfig.subconfigFields.sort((a, b) => a - b), [8, 10, 19, 33]);
+    assert.deepEqual(rec.semantic.nativeToolConfig.subconfigs.map(c => c.kind), ['run_command', 'view_file', 'list_dir', 'grep_v2']);
+    assert.deepEqual(rec.semantic.nativeToolConfig.subconfigs.map(c => c.bytes), [0, 0, 0, 0]);
+  });
+
+  it('summarizes native tool config subconfig child fields for IDE diffing', () => {
+    process.env.WINDSURFAPI_PROTO_TRACE = '1';
+    const toolConfig = Buffer.concat([
+      writeMessageField(33, Buffer.concat([
+        writeStringField(1, 'rg'),
+        writeBoolField(7, true),
+      ])),
+      writeStringField(32, 'grep_v2'),
+    ]);
+    const planner = writeMessageField(13, toolConfig);
+    const cascadeConfig = writeMessageField(1, planner);
+    const proto = writeMessageField(5, cascadeConfig);
+
+    traceGrpcPayload({
+      port: 42100,
+      path: '/exa.language_server_pb.LanguageServerService/SendUserCascadeMessage',
+      direction: 'request',
+      body: grpcFrame(proto),
+      transport: 'grpc',
+      framed: true,
+    });
+
+    const file = join(dir, `ls-proto-${process.pid}-SendUserCascadeMessage.jsonl`);
+    const rec = JSON.parse(readFileSync(file, 'utf8').trim());
+    const grep = rec.semantic.nativeToolConfig.subconfigs[0];
+    assert.equal(grep.field, 33);
+    assert.equal(grep.kind, 'grep_v2');
+    assert.deepEqual(grep.fieldNumbers, [1, 7]);
+    assert.deepEqual(grep.fields.map(f => [f.field, f.wireType]), [[1, 2], [7, 0]]);
+    assert.ok(grep.bytes > 0);
   });
 
   it('adds semantic GetCascadeTrajectorySteps native oneof summaries', () => {

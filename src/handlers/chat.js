@@ -38,6 +38,15 @@ import {
 } from '../special-agent.js';
 import { sanitizeText, sanitizeToolCall, PathSanitizeStream } from '../sanitize.js';
 import { registerSseController } from '../sse-registry.js';
+import {
+  recordNativeBridgeAccountGateReject,
+  recordNativeBridgeAccountGateSkip,
+  recordNativeBridgeCascadeToolCall,
+  recordNativeBridgeEmittedToolCall,
+  recordNativeBridgeNoToolCallResponse,
+  recordNativeBridgeRequest,
+  recordNativeBridgeUnmappedCascadeToolCall,
+} from '../native-bridge-stats.js';
 
 const HEARTBEAT_MS = 15_000;
 const QUEUE_RETRY_MS = 1_000;
@@ -1550,12 +1559,18 @@ async function _handleChatCompletionsInner(body, context = {}) {
   if (nativeBridgeOn) {
     const mappedNames = toolPartition.mapped.map(t => t?.function?.name).join(',') || '(none)';
     const unmappedNames = toolPartition.unmapped.map(t => t?.function?.name).join(',') || '(none)';
+    recordNativeBridgeRequest({
+      mappedTools: toolPartition.mapped.map(t => t?.function?.name).filter(Boolean),
+      unmappedTools: toolPartition.unmapped.map(t => t?.function?.name).filter(Boolean),
+      additionalSteps: nativeAdditionalSteps.length,
+    });
     log.info(`Chat[${reqId}]: native bridge ON — model=${routingModelKey} mapped=[${mappedNames}] unmapped=[${unmappedNames}] allowlist=${nativeAllowlist.join(',')} additional_steps=${nativeAdditionalSteps.length}`);
   }
   if (nativeBridgeOn && hasNativeBridgeAccountGate()) {
     const hasAllowedAccount = getAccountList()
       .some(a => a.status === 'active' && isNativeBridgeAccountAllowed(a));
     if (!hasAllowedAccount) {
+      recordNativeBridgeAccountGateReject();
       return {
         status: 503,
         body: {
@@ -2247,9 +2262,13 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
         const nativeCalls = [];
         for (const raw of (chunks.toolCalls || [])) {
           if (!raw?.cascade_native) continue;
+          recordNativeBridgeCascadeToolCall(raw.name);
           const candidates = lookup.get(raw.name) || [];
           const callerName = candidates[0];
-          if (!callerName) continue;
+          if (!callerName) {
+            recordNativeBridgeUnmappedCascadeToolCall(raw.name);
+            continue;
+          }
           const reverseFn = TOOL_MAP[callerName]?.reverse;
           let cascadeArgs;
           try { cascadeArgs = JSON.parse(raw.argumentsJson || '{}'); } catch { cascadeArgs = {}; }
@@ -2263,12 +2282,14 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
           });
         }
         toolCalls = filterToolCallsByAllowlist(nativeCalls, tools);
+        for (const tc of toolCalls) recordNativeBridgeEmittedToolCall(tc.name, { source: 'cascade' });
         if (toolCalls.length === 0 && allText) {
           const fallback = parseNativeFunctionCallsFromText(allText, lookup);
           const filteredFallback = filterToolCallsByAllowlist(fallback.toolCalls, tools);
           allText = fallback.text || '';
           if (filteredFallback.length) {
             toolCalls = filteredFallback;
+            for (const tc of toolCalls) recordNativeBridgeEmittedToolCall(tc.name, { source: 'provider_xml' });
             log.info(`Chat[non-stream]: native bridge parsed ${toolCalls.length} provider-native function_call(s) from text`);
           }
         }
@@ -2280,6 +2301,7 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
         if (toolCalls.length === 0 && (chunks.toolCalls || []).length > 0) {
           log.info(`Chat[non-stream]: nativeBridge=true received ${chunks.toolCalls.length} cascade tool calls but none mapped to caller tools (kinds=${chunks.toolCalls.map(tc => tc.name).join(',')})`);
         }
+        if (toolCalls.length === 0) recordNativeBridgeNoToolCallResponse();
       } else if (emulateTools) {
         // Capture pre-parse text once for diagnostic logging — useful when
         // non-Claude models emit a tool call in a format the parser missed.
@@ -2912,6 +2934,7 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
           const tc = sanitizeToolCall(repairToolCallArguments(rawTc, messages));
           const idx = collectedToolCalls.length;
           collectedToolCalls.push(tc);
+          recordNativeBridgeEmittedToolCall(tc.name, { source: 'provider_xml' });
           emitToolCallDelta(tc, idx);
         }
         return filtered.length;
@@ -2932,6 +2955,7 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
         // turn end (release notes for v2.0.65 documented the gap).
         if (nativeBridgeOn && chunk.nativeToolCall) {
           const raw = chunk.nativeToolCall;
+          recordNativeBridgeCascadeToolCall(raw.name);
           const lookup = nativeOpts?.callerLookup || new Map();
           const candidates = lookup.get(raw.name) || [];
           const callerName = candidates[0];
@@ -2952,8 +2976,11 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
               const tc = sanitizeToolCall(repairToolCallArguments(filtered[0], messages));
               const idx = collectedToolCalls.length;
               collectedToolCalls.push(tc);
+              recordNativeBridgeEmittedToolCall(tc.name, { source: 'cascade' });
               emitToolCallDelta(tc, idx);
             }
+          } else {
+            recordNativeBridgeUnmappedCascadeToolCall(raw.name);
           }
           return;
         }
@@ -3105,6 +3132,7 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
 
           try {
             if (nativeBridgeOn && !isNativeBridgeAccountAllowed(acct)) {
+              recordNativeBridgeAccountGateSkip();
               log.info(`Chat[${reqId}]: native bridge account gate skipped ${acct.email || acct.id || '(unknown)'}`);
               continue;
             }
@@ -3282,9 +3310,13 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
               const nativeRaw = [];
               for (const raw of cascadeResult.toolCalls) {
                 if (!raw?.cascade_native) continue;
+                recordNativeBridgeCascadeToolCall(raw.name);
                 const candidates = lookup.get(raw.name) || [];
                 const callerName = candidates[0];
-                if (!callerName) continue;
+                if (!callerName) {
+                  recordNativeBridgeUnmappedCascadeToolCall(raw.name);
+                  continue;
+                }
                 const reverseFn = TOOL_MAP[callerName]?.reverse;
                 let cascadeArgs;
                 try { cascadeArgs = JSON.parse(raw.argumentsJson || '{}'); } catch { cascadeArgs = {}; }
@@ -3302,12 +3334,14 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
                 const tc = sanitizeToolCall(repairToolCallArguments(rawTc, messages));
                 const idx = collectedToolCalls.length;
                 collectedToolCalls.push(tc);
+                recordNativeBridgeEmittedToolCall(tc.name, { source: 'cascade' });
                 emitToolCallDelta(tc, idx);
               }
               if (filteredNative.length === 0 && cascadeResult.toolCalls.some(tc => tc.cascade_native)) {
                 log.info(`Chat[stream]: nativeBridge=true received cascade tool calls but none mapped to caller tools (kinds=${cascadeResult.toolCalls.filter(tc => tc.cascade_native).map(tc => tc.name).join(',')})`);
               }
             }
+            if (nativeBridgeOn && collectedToolCalls.length === 0) recordNativeBridgeNoToolCallResponse();
             // Pool check-in on success (cascade only)
             if (reuseEnabled && cascadeResult?.cascadeId && (accText || collectedToolCalls.length)) {
               const turnComplete = appendAssistantTurn(messages, accText, collectedToolCalls);
