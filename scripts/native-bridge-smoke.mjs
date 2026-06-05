@@ -12,6 +12,7 @@ const streamEarlyTool = process.env.NATIVE_BRIDGE_SMOKE_EARLY_TOOL !== '0';
 const includeEnv = process.env.NATIVE_BRIDGE_SMOKE_ENV !== '0';
 const includeHealth = process.env.NATIVE_BRIDGE_SMOKE_HEALTH !== '0';
 const requireNativeBridgeTool = process.env.NATIVE_BRIDGE_SMOKE_REQUIRE_NATIVE !== '0';
+const validateToolArgs = process.env.NATIVE_BRIDGE_SMOKE_VALIDATE_ARGS !== '0';
 async function sha256Hex(text) {
   const bytes = new TextEncoder().encode(String(text || ''));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -98,21 +99,39 @@ const SCENARIOS = {
     tools: [TOOL.Read],
     choice: 'Read',
     prompt: `Use the Read tool exactly once for ${smokeFile} with limit 20. Marker: ${marker}. Do not answer in prose.`,
+    expectArgs: 'file_path ending in README.md',
+    validateArgs(args) {
+      const filePath = String(args.file_path || args.path || '');
+      return /(^|[/\\])README\.md$/i.test(filePath);
+    },
   },
   Bash: {
     tools: [TOOL.Bash],
     choice: 'Bash',
     prompt: `Use the Bash tool exactly once with command: printf ${marker}. Do not answer in prose.`,
+    expectArgs: `command containing ${marker}`,
+    validateArgs(args) {
+      const command = String(args.command || args.command_line || '');
+      return command.includes(marker);
+    },
   },
   Grep: {
     tools: [TOOL.Grep],
     choice: 'Grep',
     prompt: `Use the Grep tool exactly once with pattern "Proxy workspace placeholder", path ${smokeCwd}, glob README.md, and output_mode files_with_matches. Marker: ${marker}. Do not answer in prose.`,
+    expectArgs: 'pattern "Proxy workspace placeholder"',
+    validateArgs(args) {
+      return String(args.pattern || '').trim() === 'Proxy workspace placeholder';
+    },
   },
   Glob: {
     tools: [TOOL.Glob],
     choice: 'Glob',
     prompt: `Use the Glob tool exactly once with pattern README.md and path ${smokeCwd}. Marker: ${marker}. Do not answer in prose.`,
+    expectArgs: 'pattern exactly README.md',
+    validateArgs(args) {
+      return String(args.pattern || '').trim() === 'README.md';
+    },
   },
   mixed: {
     tools: [TOOL.Read, TOOL.Bash, TOOL.Grep, TOOL.Glob],
@@ -256,6 +275,7 @@ function streamDiagnostics(text, calls = []) {
     finishReasons: [...new Set(finishReasons)],
     toolCallNames: namesFromCalls(calls),
     toolCallSources: calls.map(toolCallSource),
+    toolCallArguments: calls.map(toolCallArgumentPreview),
     contentPreview: compactText(contents.join('')),
     reasoningPreview: compactText(reasoning.join('')),
     usage: usageFrames.at(-1) || null,
@@ -271,6 +291,7 @@ function nonStreamDiagnostics(json, rawText, calls = []) {
     finishReason: choice.finish_reason || null,
     toolCallNames: namesFromCalls(calls),
     toolCallSources: calls.map(toolCallSource),
+    toolCallArguments: calls.map(toolCallArgumentPreview),
     contentPreview: compactText(message.content || ''),
     usage: json?.usage || null,
     rawPreview: compactText(rawText),
@@ -307,7 +328,29 @@ function matchingToolCalls(calls, expected) {
   });
 }
 
-function assertExpectedTool(calls, scenarioName, expected, diagnostic = null) {
+function parseToolCallArguments(call) {
+  const raw = call?.function?.arguments ?? call?.argumentsJson ?? call?.arguments ?? '';
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return { __parse_error: compactText(raw, 240) };
+  }
+}
+
+function toolCallArgumentPreview(call) {
+  const args = parseToolCallArguments(call);
+  const out = {};
+  for (const [key, value] of Object.entries(args).slice(0, 8)) {
+    out[key] = typeof value === 'string' ? compactText(value, 240) : value;
+  }
+  return out;
+}
+
+function assertExpectedTool(calls, scenarioName, scenario, diagnostic = null) {
+  const expected = scenario.choice || '';
   const matches = matchingToolCalls(calls, expected);
   const names = namesFromCalls(calls);
   if (!names.length) throw smokeError(`${scenarioName}: produced no tool_calls`, diagnostic);
@@ -317,6 +360,14 @@ function assertExpectedTool(calls, scenarioName, expected, diagnostic = null) {
   if (requireNativeBridgeTool && !matches.some(isNativeBridgeToolCall)) {
     const sources = [...new Set(matches.map(toolCallSource))].join(',') || '(none)';
     throw smokeError(`${scenarioName}: produced tool_calls but no native bridge tool_call (sources=${sources})`, diagnostic);
+  }
+  if (validateToolArgs && expected && typeof scenario.validateArgs === 'function') {
+    const eligible = requireNativeBridgeTool ? matches.filter(isNativeBridgeToolCall) : matches;
+    const ok = eligible.some(call => scenario.validateArgs(parseToolCallArguments(call)));
+    if (!ok) {
+      const expectedArgs = scenario.expectArgs || 'expected smoke arguments';
+      throw smokeError(`${scenarioName}: native bridge tool_call arguments did not match (${expectedArgs})`, diagnostic);
+    }
   }
   return names;
 }
@@ -341,7 +392,7 @@ async function runNonStream(name, scenario) {
   }
   const calls = json.choices?.[0]?.message?.tool_calls || [];
   const diagnostic = nonStreamDiagnostics(json, res.text, calls);
-  return { toolCalls: calls.length, names: assertExpectedTool(calls, name, scenario.choice || '', diagnostic), diagnostic };
+  return { toolCalls: calls.length, names: assertExpectedTool(calls, name, scenario, diagnostic), diagnostic };
 }
 
 async function runStream(name, scenario) {
@@ -360,7 +411,7 @@ async function runStream(name, scenario) {
   const diagnostic = streamDiagnostics(res.text, calls);
   return {
     toolCalls: calls.length,
-    names: assertExpectedTool(calls, name, scenario.choice || '', diagnostic),
+    names: assertExpectedTool(calls, name, scenario, diagnostic),
     earlyTool: res.earlyTool,
     seenDone: !!res.seenDone,
     diagnostic,
@@ -465,6 +516,8 @@ console.log(JSON.stringify({
   smokeFile,
   includeEnv,
   includeHealth,
+  requireNativeBridgeTool,
+  validateToolArgs,
   streamEarlyTool,
   scenarios: selected,
   results,
