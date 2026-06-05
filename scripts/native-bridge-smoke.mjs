@@ -584,6 +584,39 @@ function assertLsBudgetAvailable(health) {
   });
 }
 
+function counterDelta(before = {}, after = {}) {
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  const out = {};
+  for (const key of keys) {
+    const delta = Number(after?.[key] || 0) - Number(before?.[key] || 0);
+    if (delta) out[key] = delta;
+  }
+  return out;
+}
+
+function nativeBridgeDecisionDelta(before, after) {
+  const b = before?.nativeBridge || {};
+  const a = after?.nativeBridge || {};
+  const recent = Array.isArray(a.recentDecisions) ? a.recentDecisions.slice(-8) : [];
+  return {
+    decisions: Number(a.decisions || 0) - Number(b.decisions || 0),
+    enabledDecisions: Number(a.enabledDecisions || 0) - Number(b.enabledDecisions || 0),
+    disabledDecisions: Number(a.disabledDecisions || 0) - Number(b.disabledDecisions || 0),
+    reasons: counterDelta(b.decisionReasons || {}, a.decisionReasons || {}),
+    lastDecision: a.lastDecision || null,
+    recentDecisions: recent.map(d => ({
+      at: d.at,
+      enabled: !!d.enabled,
+      reason: d.reason || '',
+      modelKey: d.modelKey || '',
+      route: d.route || '',
+      mappedTools: d.mappedTools || [],
+      unmappedTools: d.unmappedTools || [],
+      toolChoiceFiltered: !!d.toolChoiceFiltered,
+    })),
+  };
+}
+
 const selected = expandScenarios(requestedScenarios);
 if (!selected.length) {
   console.error(`No valid scenarios selected. Use one or more of: ${Object.keys(SCENARIOS).join(',')},all`);
@@ -641,6 +674,7 @@ console.log(JSON.stringify({
   scenarios: selected,
   results,
   failures,
+  nativeBridgeDecisionDelta: nativeBridgeDecisionDelta(healthBefore, healthAfter),
   healthBefore,
   healthAfter,
 }, null, 2));

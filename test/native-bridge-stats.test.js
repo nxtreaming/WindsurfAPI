@@ -8,6 +8,7 @@ import {
   recordNativeBridgeCascadeToolCall,
   recordNativeBridgeEmittedToolCall,
   recordNativeBridgeNoToolCallResponse,
+  recordNativeBridgeDecision,
   recordNativeBridgeRequest,
   recordNativeBridgeUnmappedCascadeToolCall,
   resetNativeBridgeStats,
@@ -52,14 +53,66 @@ describe('native bridge runtime stats', () => {
     assert.equal(stats.unmappedByCascadeKind.list_directory, 1);
   });
 
+  it('records native bridge decision reasons without leaking caller secrets', () => {
+    recordNativeBridgeDecision({
+      enabled: false,
+      reason: 'native_bridge_model_not_allowed',
+      mode: 'all_mapped',
+      useCascade: true,
+      modelKey: 'gpt-5.5-medium',
+      provider: 'openai',
+      route: 'chat',
+      callerKey: 'api:secret-hash',
+      hasTools: true,
+      toolCount: 2,
+      mappedCount: 1,
+      unmappedCount: 1,
+      mappedTools: ['Read'],
+      unmappedTools: ['update_plan'],
+    });
+    recordNativeBridgeDecision({
+      enabled: true,
+      reason: 'native_bridge_enabled',
+      mode: '1',
+      useCascade: true,
+      modelKey: 'claude-sonnet-4.6',
+      provider: 'anthropic',
+      route: 'chat',
+      hasTools: true,
+      toolCount: 1,
+      mappedTools: ['Bash'],
+      unmappedTools: [],
+    });
+
+    const stats = getNativeBridgeStats();
+    assert.equal(stats.decisions, 2);
+    assert.equal(stats.enabledDecisions, 1);
+    assert.equal(stats.disabledDecisions, 1);
+    assert.equal(stats.decisionReasons.native_bridge_model_not_allowed, 1);
+    assert.equal(stats.decisionReasons.native_bridge_enabled, 1);
+    assert.equal(stats.lastDecision.reason, 'native_bridge_enabled');
+    assert.equal(stats.recentDecisions.length, 2);
+    assert.equal(JSON.stringify(stats).includes('secret-hash'), false);
+  });
+
   it('returns copies so callers cannot mutate counters', () => {
     recordNativeBridgeRequest({ mappedTools: ['Glob'] });
+    recordNativeBridgeDecision({
+      enabled: false,
+      reason: 'native_bridge_all_mapped_required',
+      mappedTools: ['Glob'],
+      unmappedTools: ['update_plan'],
+    });
     const snapshot = getNativeBridgeStats();
     snapshot.requestedByTool.Glob = 0;
     snapshot.unmappedRequestedByTool.Edit = 1;
     snapshot.unmappedByCascadeKind.find = 1;
+    snapshot.decisionReasons.native_bridge_all_mapped_required = 0;
+    snapshot.recentDecisions[0].mappedTools[0] = 'Mutated';
     assert.equal(getNativeBridgeStats().requestedByTool.Glob, 1);
     assert.equal(getNativeBridgeStats().unmappedRequestedByTool.Edit, undefined);
     assert.equal(getNativeBridgeStats().unmappedByCascadeKind.find, undefined);
+    assert.equal(getNativeBridgeStats().decisionReasons.native_bridge_all_mapped_required, 1);
+    assert.equal(getNativeBridgeStats().recentDecisions[0].mappedTools[0], 'Glob');
   });
 });

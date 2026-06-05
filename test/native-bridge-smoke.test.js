@@ -198,6 +198,28 @@ describe('native bridge smoke CLI', () => {
           accounts: { total: 1, active: 1, error: 0 },
           nativeBridge: {
             requests: healthHits,
+            decisions: healthHits,
+            enabledDecisions: 0,
+            disabledDecisions: healthHits,
+            decisionReasons: { native_bridge_no_tool_call: healthHits },
+            lastDecision: {
+              at: new Date(1700000000000 + healthHits).toISOString(),
+              enabled: false,
+              reason: 'native_bridge_no_tool_call',
+              modelKey: 'claude-test',
+              route: 'chat',
+              mappedTools: ['Read'],
+              unmappedTools: [],
+            },
+            recentDecisions: [{
+              at: new Date(1700000000000 + healthHits).toISOString(),
+              enabled: false,
+              reason: 'native_bridge_no_tool_call',
+              modelKey: 'claude-test',
+              route: 'chat',
+              mappedTools: ['Read'],
+              unmappedTools: [],
+            }],
             mappedTools: 1,
             unmappedTools: 0,
             noToolCallResponses: healthHits - 1,
@@ -267,6 +289,9 @@ describe('native bridge smoke CLI', () => {
       assert.equal(json.ok, false);
       assert.equal(json.healthBefore.nativeBridge.requests, 1);
       assert.equal(json.healthAfter.nativeBridge.noToolCallResponses, 1);
+      assert.deepEqual(json.nativeBridgeDecisionDelta.reasons, { native_bridge_no_tool_call: 1 });
+      assert.equal(json.nativeBridgeDecisionDelta.disabledDecisions, 1);
+      assert.equal(json.nativeBridgeDecisionDelta.lastDecision.reason, 'native_bridge_no_tool_call');
       assert.equal(json.healthAfter.lsPool.pool.canStartNewNonDefault, true);
       const stream = json.results.Read.stream;
       assert.equal(stream.ok, false);

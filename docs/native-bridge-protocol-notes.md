@@ -180,6 +180,38 @@ separate first-party API bridge until we find the LS-side web executor
 precondition. The confirmed protobuf fields are useful for tracing and future
 matrix work, but not sufficient for production native bridge rollout.
 
+## Direct Web Search API
+
+`GetWebSearchResults` is confirmed independently of the LS-native tool path:
+
+```text
+POST /exa.api_server_pb.ApiServerService/GetWebSearchResults
+```
+
+Request fields from the descriptor dump:
+
+- `metadata` = field `1`
+- `query` = field `2`
+- `limit` = field `3`
+- `domain` = field `4`
+- `third_party_config` = field `5`
+- `mode` = field `6`
+
+Response fields:
+
+- `results` = repeated field `1` (`KnowledgeBaseItem`)
+- `web_search_url` = field `2`
+- `summary` = field `3`
+
+`src/windsurf-api.js` exposes `getWebSearchResults()` and
+`npm run probe:web-search` exercises it against real accounts. This is the
+preferred WebSearch investigation path for now because it avoids the LS native
+web executor that currently returns `permission_denied`.
+
+There is not yet an equivalent confirmed direct WebFetch/read-url endpoint.
+Do not implement WebFetch direct bridging from guesswork; keep it on emulation
+or native lab traces until a descriptor-backed endpoint is found.
+
 ## Experiment Hooks
 
 `WINDSURFAPI_NATIVE_TOOL_BRIDGE_CONFIG_RAW` can inject exact protobuf bytes

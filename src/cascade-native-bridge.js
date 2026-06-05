@@ -1325,15 +1325,110 @@ export function buildAdditionalStepsFromHistory(messages) {
  *   WINDSURFAPI_NATIVE_TOOL_BRIDGE=all_mapped → on only if all tools map
  *   WINDSURFAPI_NATIVE_TOOL_BRIDGE_OFF=1      → force off (highest priority)
  */
-export function shouldUseNativeBridge(tools, { modelKey = '', provider = '', route = '', callerKey = '' } = {}) {
-  if (process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_OFF === '1') return false;
+function nativeBridgeModeFlags() {
   const mode = String(process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE || '').trim().toLowerCase();
-  const explicitOn = mode === '1' || mode === 'true' || mode === 'force';
-  const allMappedOnly = mode === 'all_mapped' || mode === 'all-mapped' || mode === 'mapped_only' || mode === 'mapped-only';
-  const grayGate = nativeBridgeGrayGateStatus({ modelKey, provider, route, callerKey });
-  if (!grayGate.ok) return false;
-  const part = partitionTools(tools);
-  if (!part.hasAny) return false;
-  if (allMappedOnly) return part.unmapped.length === 0;
-  return explicitOn;
+  return {
+    mode,
+    explicitOn: mode === '1' || mode === 'true' || mode === 'force',
+    allMappedOnly: mode === 'all_mapped' || mode === 'all-mapped' || mode === 'mapped_only' || mode === 'mapped-only',
+  };
+}
+
+function toolNamesFromList(tools) {
+  return (Array.isArray(tools) ? tools : [])
+    .map(t => t?.function?.name || t?.name || '')
+    .filter(Boolean);
+}
+
+function nativeBridgeDecision({
+  enabled = false,
+  reason,
+  tools,
+  partition,
+  useCascade,
+  mode,
+  explicitOn,
+  allMappedOnly,
+  modelKey,
+  provider,
+  route,
+} = {}) {
+  const mappedTools = toolNamesFromList(partition?.mapped);
+  const unmappedTools = toolNamesFromList(partition?.unmapped);
+  return {
+    enabled: !!enabled,
+    reason: reason || (enabled ? 'native_bridge_enabled' : 'native_bridge_disabled'),
+    mode,
+    explicitOn: !!explicitOn,
+    allMappedOnly: !!allMappedOnly,
+    useCascade: !!useCascade,
+    modelKey: String(modelKey || ''),
+    provider: String(provider || ''),
+    route: String(route || ''),
+    hasTools: Array.isArray(tools) && tools.length > 0,
+    toolCount: Array.isArray(tools) ? tools.length : 0,
+    mappedCount: mappedTools.length,
+    unmappedCount: unmappedTools.length,
+    mappedTools,
+    unmappedTools,
+    partition,
+  };
+}
+
+export function getNativeBridgeDecision(tools, {
+  modelKey = '',
+  model = '',
+  provider = '',
+  route = '',
+  callerKey = '',
+  useCascade = true,
+} = {}) {
+  const list = Array.isArray(tools) ? tools : [];
+  const partition = partitionTools(list);
+  const { mode, explicitOn, allMappedOnly } = nativeBridgeModeFlags();
+  const base = {
+    tools: list,
+    partition,
+    useCascade,
+    mode,
+    explicitOn,
+    allMappedOnly,
+    modelKey,
+    provider,
+    route,
+  };
+
+  if (process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_OFF === '1') {
+    return nativeBridgeDecision({ ...base, reason: 'native_bridge_off' });
+  }
+  if (!useCascade) {
+    return nativeBridgeDecision({ ...base, reason: 'native_bridge_non_cascade' });
+  }
+  if (!list.length) {
+    return nativeBridgeDecision({ ...base, reason: 'native_bridge_no_tools' });
+  }
+  if (!explicitOn && !allMappedOnly) {
+    return nativeBridgeDecision({ ...base, reason: 'native_bridge_mode_not_enabled' });
+  }
+  const grayGate = nativeBridgeGrayGateStatus({ modelKey, model, provider, route, callerKey });
+  if (!grayGate.ok) {
+    return nativeBridgeDecision({ ...base, reason: grayGate.errorType || 'native_bridge_gray_gate_denied' });
+  }
+  if (!partition.hasAny) {
+    return nativeBridgeDecision({ ...base, reason: 'native_bridge_no_mapped_tools' });
+  }
+  if (allMappedOnly && partition.unmapped.length) {
+    return nativeBridgeDecision({ ...base, reason: 'native_bridge_all_mapped_required' });
+  }
+  return nativeBridgeDecision({ ...base, enabled: true, reason: 'native_bridge_enabled' });
+}
+
+export function shouldUseNativeBridge(tools, { modelKey = '', provider = '', route = '', callerKey = '' } = {}) {
+  return getNativeBridgeDecision(tools, {
+    modelKey,
+    provider,
+    route,
+    callerKey,
+    useCascade: true,
+  }).enabled;
 }

@@ -810,6 +810,76 @@ tbody tr:hover td { background: var(--surface-2); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.native-bridge-panel {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.native-bridge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.native-bridge-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.native-bridge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.native-bridge-kv {
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.native-bridge-kv .k {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.native-bridge-kv .v {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.native-bridge-decisions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.native-bridge-decision {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(120px, 1fr) minmax(180px, 2fr);
+  gap: 8px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.native-bridge-tools {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .native-bridge-decision { grid-template-columns: 1fr; }
+}
 
 /* ─── Model Chips ─────────────────────────────── */
 .model-chips {
@@ -1623,6 +1693,17 @@ window._firebaseOAuth = async function(provider) {
       <div class="section-body">
         <div id="ls-status"></div>
         <div id="ls-binary-info" style="margin-top:12px;font-size:12px;color:var(--text-muted)"></div>
+      </div>
+    </div>
+    <div class="section" id="native-bridge-overview-section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Native Bridge</div>
+          <div class="section-desc">Routing decisions and gray-gate visibility</div>
+        </div>
+      </div>
+      <div class="section-body">
+        <div id="native-bridge-status"></div>
       </div>
     </div>
   </section>
@@ -2610,6 +2691,62 @@ const App = {
       </div>`;
   },
 
+  renderNativeBridgeTelemetry(health = {}) {
+    const root = document.getElementById('native-bridge-status');
+    if (!root) return;
+    const stats = health.nativeBridge || {};
+    const cfg = health.nativeBridgeConfig || {};
+    const recent = Array.isArray(stats.recentDecisions) ? stats.recentDecisions.slice(-5).reverse() : [];
+    const reasons = stats.decisionReasons || {};
+    const topReasons = Object.entries(reasons)
+      .sort(([, a], [, b]) => Number(b || 0) - Number(a || 0))
+      .slice(0, 5)
+      .map(([reason, count]) => `${reason}:${count}`)
+      .join(' | ');
+    const mode = cfg.off ? 'off override' : (cfg.mode || 'off');
+    const modeClass = cfg.off ? 'error' : (cfg.mode ? 'success' : 'muted');
+    const gateBits = [
+      cfg.hasApiKeyGate ? 'api-key' : '',
+      cfg.hasAccountGate ? 'account' : '',
+      cfg.models?.length ? `models=${cfg.models.join(',')}` : '',
+      cfg.providers?.length ? `providers=${cfg.providers.join(',')}` : '',
+      cfg.routes?.length ? `routes=${cfg.routes.join(',')}` : '',
+      cfg.callers?.length ? `callers=${cfg.callers.length}` : '',
+    ].filter(Boolean).join(' | ') || 'none';
+    const tools = Array.isArray(cfg.tools) && cfg.tools.length ? cfg.tools.join(',') : '(default Bash only)';
+    const last = stats.lastDecision || null;
+    const lastReason = last?.reason || 'none';
+    const rows = recent.map(d => {
+      const badgeClass = d.enabled ? 'success' : 'warn';
+      const mapped = (d.mappedTools || []).join(',') || '-';
+      const unmapped = (d.unmappedTools || []).join(',') || '-';
+      const when = d.at ? new Date(d.at).toLocaleTimeString() : '-';
+      return `
+        <div class="native-bridge-decision" title="${this.esc(d.reason || '')}">
+          <div><span class="badge ${badgeClass} no-dot">${this.esc(d.reason || 'unknown')}</span></div>
+          <div>${this.esc(d.modelKey || '-')} · ${this.esc(d.route || '-')} · ${this.esc(when)}</div>
+          <div class="native-bridge-tools">mapped ${this.esc(mapped)} | unmapped ${this.esc(unmapped)}</div>
+        </div>`;
+    }).join('');
+    root.innerHTML = `
+      <div class="native-bridge-panel">
+        <div class="native-bridge-header">
+          <div class="native-bridge-title">Native tool bridge</div>
+          <span class="badge ${modeClass} no-dot">${this.esc(mode)}</span>
+        </div>
+        <div class="native-bridge-grid">
+          <div class="native-bridge-kv"><span class="k">decisions</span><span class="v">${stats.decisions || 0} total · ${stats.enabledDecisions || 0} on · ${stats.disabledDecisions || 0} off</span></div>
+          <div class="native-bridge-kv"><span class="k">last reason</span><span class="v" title="${this.esc(lastReason)}">${this.esc(lastReason)}</span></div>
+          <div class="native-bridge-kv"><span class="k">tools</span><span class="v" title="${this.esc(tools)}">${this.esc(tools)}</span></div>
+          <div class="native-bridge-kv"><span class="k">gates</span><span class="v" title="${this.esc(gateBits)}">${this.esc(gateBits)}</span></div>
+          <div class="native-bridge-kv"><span class="k">top reasons</span><span class="v" title="${this.esc(topReasons || 'none')}">${this.esc(topReasons || 'none')}</span></div>
+        </div>
+        <div class="native-bridge-decisions">
+          ${rows || '<div class="text-sm text-muted">No native bridge routing decisions recorded yet.</div>'}
+        </div>
+      </div>`;
+  },
+
   async toggleLang() {
     const newLang = I18n.locale === 'zh' || I18n.locale === 'zh-CN' ? 'en' : 'zh';
     await I18n.setLocale(newLang);
@@ -3005,6 +3142,7 @@ docker compose up -d --force-recreate</pre>
 
   async loadOverview() {
     const d = await this.api('GET', '/overview');
+    this.renderNativeBridgeTelemetry(d);
     // Fetch /health (no auth) in parallel for version/commit info
     try {
       const h = await fetch('/health').then(r => r.json()).catch(() => null);
@@ -3019,7 +3157,9 @@ docker compose up -d --force-recreate</pre>
         }
         this._versionInfo = h;
       }
-    } catch {}
+    } catch {
+      /* keep overview telemetry from /dashboard/api/overview */
+    }
     const uptime = d.uptime ? this.fmtDuration(d.uptime) : '-';
     const ls = d.langServer || {};
     const poolCount = (ls.instances || []).length || (ls.running ? 1 : 0);

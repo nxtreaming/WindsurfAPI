@@ -32,6 +32,8 @@ import { MODELS, MODEL_TIER_ACCESS as _TIER_TABLE, getTierModels as _getTierMode
 import { windsurfLogin, refreshFirebaseToken, reRegisterWithCodeium } from './windsurf-login.js';
 import { getModelAccessConfig, setModelAccessMode, setModelAccessList, addModelToList, removeModelFromList } from './model-access.js';
 import { checkMessageRateLimit } from '../windsurf-api.js';
+import { getNativeBridgeConfigStatus } from '../cascade-native-bridge.js';
+import { getNativeBridgeStats } from '../native-bridge-stats.js';
 import { assertPublicUrlHost } from '../image.js';
 import { validateHostFormat } from '../net-safety.js';
 import { discoverWindsurfCredentials, isLoopbackAddress } from './local-windsurf.js';
@@ -275,6 +277,8 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
         ? ((stats.successCount / stats.totalRequests) * 100).toFixed(1)
         : '0.0',
       cache: cacheStats(),
+      nativeBridge: getNativeBridgeStats(),
+      nativeBridgeConfig: getNativeBridgeConfigStatus(),
     });
   }
 

@@ -26,6 +26,7 @@ const SERVER_HOSTS = [
 const USER_STATUS_PATH = '/exa.seat_management_pb.SeatManagementService/GetUserStatus';
 const MODEL_CONFIGS_PATH = '/exa.api_server_pb.ApiServerService/GetCascadeModelConfigs';
 const RATE_LIMIT_PATH = '/exa.api_server_pb.ApiServerService/CheckUserMessageRateLimit';
+const WEB_SEARCH_PATH = '/exa.api_server_pb.ApiServerService/GetWebSearchResults';
 
 import { isSocks, createSocksTunnel } from './socks.js';
 
@@ -63,7 +64,14 @@ function isProxyError(err) {
   return /Proxy CONNECT failed|Proxy tunnel|Proxy connection/i.test(m);
 }
 
+let postJsonOverride = null;
+
+export function __setWindsurfApiPostJsonForTest(fn) {
+  postJsonOverride = typeof fn === 'function' ? fn : null;
+}
+
 function postJson(host, path, body, proxy) {
+  if (postJsonOverride) return postJsonOverride(host, path, body, proxy);
   return new Promise(async (resolve, reject) => {
     const postData = JSON.stringify(body);
     const opts = {
@@ -109,6 +117,17 @@ function postJson(host, path, body, proxy) {
       req.end();
     } catch (err) { reject(err); }
   });
+}
+
+function normalizeWebSearchResults(data) {
+  const results = Array.isArray(data?.results) ? data.results : [];
+  return {
+    results,
+    webSearchUrl: data?.webSearchUrl || data?.web_search_url || '',
+    summary: data?.summary || '',
+    raw: data,
+    fetchedAt: Date.now(),
+  };
 }
 
 /**
@@ -258,6 +277,63 @@ export async function getCascadeModelConfigs(apiKey, proxy = null) {
     }
   }
   throw lastErr || new Error('GetCascadeModelConfigs: all hosts failed');
+}
+
+/**
+ * Direct Windsurf web search API.
+ *
+ * Confirmed from the LS descriptor dump and VPS canary:
+ *   GetWebSearchResultsRequest {
+ *     metadata = 1;
+ *     query = 2;
+ *     limit = 3;
+ *     domain = 4;
+ *     third_party_config = 5;
+ *     mode = 6;
+ *   }
+ *   GetWebSearchResultsResponse { results = 1; web_search_url = 2; summary = 3 }
+ *
+ * This helper is intentionally separate from the native bridge. LS-native
+ * WebSearch/WebFetch still returns a Cascade permission_denied error in live
+ * canaries even when this direct API succeeds.
+ */
+export async function getWebSearchResults(apiKey, {
+  query,
+  limit = 5,
+  domain = '',
+  thirdPartyConfig = null,
+  mode = undefined,
+} = {}, proxy = null) {
+  const q = String(query || '').trim();
+  if (!q) throw new Error('getWebSearchResults: query required');
+  const body = {
+    metadata: buildMetadata(apiKey),
+    query: q,
+    limit: Math.max(1, Math.min(10, Number(limit) || 5)),
+  };
+  if (domain) body.domain = String(domain);
+  if (thirdPartyConfig && typeof thirdPartyConfig === 'object') body.thirdPartyConfig = thirdPartyConfig;
+  if (mode !== undefined && mode !== null && mode !== '') body.mode = mode;
+
+  const proxyModes = proxy ? [proxy, null] : [null];
+  let lastErr = null;
+  for (const px of proxyModes) {
+    for (const host of SERVER_HOSTS) {
+      try {
+        const res = await postJson(host, WEB_SEARCH_PATH, body, px);
+        if (res.status >= 400) {
+          lastErr = new Error(`GetWebSearchResults ${host} -> ${res.status}: ${res.raw.slice(0, 160)}`);
+          continue;
+        }
+        return normalizeWebSearchResults(res.data);
+      } catch (e) {
+        lastErr = e;
+        log.debug(`GetWebSearchResults host ${host} failed: ${e.message}`);
+        if (px && isProxyError(e)) break;
+      }
+    }
+  }
+  throw lastErr || new Error('GetWebSearchResults: all hosts failed');
 }
 
 /**

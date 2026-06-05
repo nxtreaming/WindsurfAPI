@@ -16,6 +16,7 @@ import {
   buildReverseLookup,
   decodeCascadeStepToToolCall,
   getNativeBridgeConfigStatus,
+  getNativeBridgeDecision,
   nativeAllowlistNameForTool,
 } from '../src/cascade-native-bridge.js';
 import {
@@ -187,6 +188,7 @@ describe('native mapped-tool routing', () => {
     });
 
     assert.equal(plan.nativeBridgeOn, false);
+    assert.equal(plan.nativeDecision.reason, 'native_bridge_all_mapped_required');
     assert.deepEqual(plan.partition.mapped.map(t => t.function.name), ['Bash']);
     assert.deepEqual(plan.partition.unmapped.map(t => t.function.name), ['Read', 'Grep', 'Glob']);
   });
@@ -411,6 +413,7 @@ describe('native mapped-tool routing', () => {
       callerKey: 'caller-allowed',
     });
     assert.equal(deniedModel.nativeBridgeOn, false);
+    assert.equal(deniedModel.nativeDecision.reason, 'native_bridge_model_not_allowed');
 
     const deniedCaller = buildToolRoutingPlan([fnTool('Read')], {
       useCascade: true,
@@ -420,6 +423,7 @@ describe('native mapped-tool routing', () => {
       callerKey: 'caller-denied',
     });
     assert.equal(deniedCaller.nativeBridgeOn, false);
+    assert.equal(deniedCaller.nativeDecision.reason, 'native_bridge_caller_not_allowed');
 
     const allowed = buildToolRoutingPlan([fnTool('Read')], {
       useCascade: true,
@@ -429,6 +433,45 @@ describe('native mapped-tool routing', () => {
       callerKey: 'caller-allowed',
     });
     assert.equal(allowed.nativeBridgeOn, true);
+    assert.equal(allowed.nativeDecision.reason, 'native_bridge_enabled');
+  });
+
+  it('explains native bridge disabled decisions for operators', () => {
+    delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE;
+    delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_TOOLS;
+    delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_OFF;
+    assert.equal(
+      getNativeBridgeDecision([fnTool('Bash')], {
+        useCascade: true,
+        modelKey: 'claude-sonnet-4.6',
+        provider: 'anthropic',
+        route: 'chat',
+      }).reason,
+      'native_bridge_mode_not_enabled',
+    );
+
+    process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE = '1';
+    process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_TOOLS = 'Read';
+    const noMapped = getNativeBridgeDecision([fnTool('update_plan')], {
+      useCascade: true,
+      modelKey: 'claude-sonnet-4.6',
+      provider: 'anthropic',
+      route: 'chat',
+    });
+    assert.equal(noMapped.enabled, false);
+    assert.equal(noMapped.reason, 'native_bridge_no_mapped_tools');
+    assert.deepEqual(noMapped.unmappedTools, ['update_plan']);
+
+    process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_OFF = '1';
+    assert.equal(
+      getNativeBridgeDecision([fnTool('Read')], {
+        useCascade: true,
+        modelKey: 'claude-sonnet-4.6',
+        provider: 'anthropic',
+        route: 'chat',
+      }).reason,
+      'native_bridge_off',
+    );
   });
 
   it('requires the API-key sentinel when API key gray gate is configured', () => {

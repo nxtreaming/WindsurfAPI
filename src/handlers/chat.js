@@ -27,7 +27,7 @@ import {
   buildSchemaCompactToolPreambleForProto, buildSkinnyToolPreambleForProto,
 } from './tool-emulation.js';
 import {
-  shouldUseNativeBridge, partitionTools, buildReverseLookup,
+  getNativeBridgeDecision, buildReverseLookup,
   buildAdditionalStepsFromHistory, parseNativeFunctionCallsFromText,
   NativeFunctionCallStreamParser, TOOL_MAP, isNativeBridgeAccountAllowed,
   hasNativeBridgeAccountGate, nativeAllowlistNameForTool,
@@ -44,6 +44,7 @@ import {
   recordNativeBridgeCascadeToolCall,
   recordNativeBridgeEmittedToolCall,
   recordNativeBridgeNoToolCallResponse,
+  recordNativeBridgeDecision,
   recordNativeBridgeRequest,
   recordNativeBridgeUnmappedCascadeToolCall,
 } from '../native-bridge-stats.js';
@@ -121,20 +122,21 @@ function upstreamTransientErrorMessage(model, triedCount, reason = 'internal_err
 
 export function buildToolRoutingPlan(tools, { useCascade = false, modelKey = '', provider = null, route = 'chat', callerKey = '' } = {}) {
   const hasTools = Array.isArray(tools) && tools.length > 0;
-  const partition = hasTools
-    ? partitionTools(tools)
-    : { mapped: [], unmapped: tools || [], hasAny: false };
-  const nativeBridgeOn = !!(useCascade && hasTools && shouldUseNativeBridge(tools, {
+  const nativeDecision = getNativeBridgeDecision(tools || [], {
+    useCascade,
     modelKey,
     provider,
     route,
     callerKey,
-  }));
+  });
+  const { partition, ...nativeDecisionSummary } = nativeDecision;
+  const nativeBridgeOn = !!nativeDecision.enabled;
   const emulationTools = nativeBridgeOn ? partition.unmapped : (tools || []);
   return {
     hasTools,
     partition,
     nativeBridgeOn,
+    nativeDecision: nativeDecisionSummary,
     emulationTools,
     nativeCallerTools: nativeBridgeOn ? partition.mapped : [],
     shouldBuildToolPreamble: Array.isArray(emulationTools) && emulationTools.length > 0,
@@ -1584,6 +1586,12 @@ async function _handleChatCompletionsInner(body, context = {}) {
     route: body.__route || 'chat',
     callerKey: nativeBridgeCallerKey,
   });
+  if (Array.isArray(tools) || toolRouting.nativeDecision.mode) {
+    recordNativeBridgeDecision({
+      ...toolRouting.nativeDecision,
+      toolChoiceFiltered: effectiveTools.length !== (Array.isArray(tools) ? tools.length : 0),
+    });
+  }
   const toolPartition = toolRouting.partition;
   const nativeBridgeOn = toolRouting.nativeBridgeOn;
   const nativeAdditionalSteps = nativeBridgeOn
