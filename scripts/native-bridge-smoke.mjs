@@ -140,7 +140,12 @@ async function post(body, { streamEarlyTool = false, expectedTool = '' } = {}) {
 
     if (!streamEarlyTool || !res.body) {
       const text = await res.text();
-      return { status: res.status, text, earlyTool: false };
+      return {
+        status: res.status,
+        text,
+        earlyTool: false,
+        seenDone: /(?:^|\n)data:\s*\[DONE\]/.test(text),
+      };
     }
 
     const reader = res.body.getReader();
