@@ -8,6 +8,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -24,12 +25,13 @@ jobs:
         run: npm run secret-scan
 
       - name: Run tests
-        run: node --test test/*.test.js
+        run: npm test
 
   docker:
     name: Docker Build & Push
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -105,6 +107,7 @@ jobs:
     name: GitHub Release
     needs: docker
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 

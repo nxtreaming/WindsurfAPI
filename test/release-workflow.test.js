@@ -17,8 +17,10 @@ describe('release workflow', () => {
     const test = jobBlock('test');
     const docker = jobBlock('docker');
     const release = jobBlock('release');
-    assert.match(test, /node --test test\/\*\.test\.js/);
+    assert.match(test, /\brun:\s*npm test\b/);
+    assert.match(test, /\btimeout-minutes:\s*10\b/);
     assert.match(docker, /\bneeds:\s*test\b/);
+    assert.match(docker, /\btimeout-minutes:\s*30\b/);
     assert.match(release, /\bneeds:\s*docker\b/);
   });
 

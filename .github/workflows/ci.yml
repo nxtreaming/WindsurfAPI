@@ -10,6 +10,7 @@ jobs:
   syntax:
     name: Node syntax check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +36,7 @@ jobs:
   test:
     name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -44,4 +46,4 @@ jobs:
           node-version: '20'
 
       - name: Run tests
-        run: node --test test/*.test.js
+        run: npm test
