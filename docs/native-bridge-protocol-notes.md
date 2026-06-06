@@ -286,6 +286,18 @@ valid canary must send `HandleCascadeUserInteraction` and then verify whether
 the same trajectory advances to `read_url_content.web_document`, an error step,
 or another requested interaction.
 
+The v2.0.141/v2.0.142 state:
+
+- `scripts/native-bridge-smoke.mjs` can summarize
+  `semantic.steps[].webFetchTrace.state` so a canary does not require manual
+  raw-trace reading for the first classification pass.
+- A narrow VPS WebFetch canary was prepared with API-key gating, one model, one
+  tool, and an allowlisted safe origin, but the request did not run because LS
+  capacity preflight refused with `ls_capacity:memory_guard`.
+- That memory-guard refusal is not WebFetch protocol evidence. The next valid
+  run must use an isolated or local environment with enough LS memory budget.
+  Do not bypass the production VPS guard just to force the canary.
+
 ## Direct Web Search API
 
 `GetWebSearchResults` is confirmed independently of the LS-native tool path:
