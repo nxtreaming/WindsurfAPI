@@ -81,12 +81,21 @@ function trajectoryStepsResponse(...steps) {
 
 async function withFakeLanguageServer(handler, fn) {
   const server = http2.createServer();
+  const sessions = new Set();
+  server.on('session', session => {
+    sessions.add(session);
+    session.on('close', () => sessions.delete(session));
+  });
   server.on('stream', handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
     return await fn(port);
   } finally {
+    for (const session of sessions) {
+      try { session.close(); } catch {}
+      try { session.destroy(); } catch {}
+    }
     await new Promise(resolve => server.close(resolve));
   }
 }
