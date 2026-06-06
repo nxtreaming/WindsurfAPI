@@ -64,6 +64,10 @@ import {
 } from './proto.js';
 import { getSystemPrompts } from './runtime-config.js';
 
+function readUrlLegacySummaryFallbackEnabled() {
+  return process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_READ_URL_LEGACY_SUMMARY === '1';
+}
+
 // ─── Enums ─────────────────────────────────────────────────
 
 export const SOURCE = {
@@ -1261,7 +1265,9 @@ export function parseTrajectorySteps(buf) {
           argumentsJson = JSON.stringify(args);
           const webDocument = getField(body, 2, 2);
           result = webDocument ? decodeKnowledgeBaseItemText(webDocument.value) : '';
-          if (!result) result = getField(body, 5, 2)?.value?.toString('utf8') || '';
+          if (!result && readUrlLegacySummaryFallbackEnabled()) {
+            result = getField(body, 5, 2)?.value?.toString('utf8') || '';
+          }
           if (!result && readUrlRequestedInteraction) continue;
         } else if (kind === 'search_web') {
           const args = {

@@ -38,24 +38,58 @@ const VERSION_INFO = getVersionInfo();
 
 // 10 MB is way above any realistic chat-completions payload while still
 // bounding worst-case memory from a malicious/broken client.
-const MAX_BODY_SIZE = 10 * 1024 * 1024;
+export const MAX_BODY_SIZE = 10 * 1024 * 1024;
 
-function readBody(req) {
+export function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      chunks.length = 0;
+      try { req.resume?.(); } catch {}
+      reject(err);
+    };
     req.on('data', c => {
+      if (settled) return;
       size += c.length;
       if (size > MAX_BODY_SIZE) {
-        req.destroy();
-        reject(Object.assign(new Error('Request body too large'), { statusCode: 413 }));
+        fail(Object.assign(new Error('Request body too large'), {
+          statusCode: 413,
+          code: 'ERR_REQUEST_BODY_TOO_LARGE',
+        }));
         return;
       }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-    req.on('error', reject);
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks).toString('utf-8'));
+    });
+    req.on('error', fail);
   });
+}
+
+export function bodyTooLargePayload(style = 'openai') {
+  if (style === 'dashboard') {
+    return { ok: false, error: 'ERR_REQUEST_BODY_TOO_LARGE', message: 'Request body too large' };
+  }
+  if (style === 'legacy') {
+    return { error: 'Request body too large' };
+  }
+  if (style === 'anthropic') {
+    return { type: 'error', error: { type: 'invalid_request_error', message: 'Request body too large' } };
+  }
+  return { error: { message: 'Request body too large', type: 'invalid_request' } };
+}
+
+function sendBodyTooLargeIfNeeded(res, err, style = 'openai') {
+  if (err?.statusCode !== 413 && err?.code !== 'ERR_REQUEST_BODY_TOO_LARGE') return false;
+  json(res, 413, bodyTooLargePayload(style));
+  return true;
 }
 
 export function extractToken(req) {
@@ -176,7 +210,9 @@ async function route(req, res) {
   if (path.startsWith('/dashboard/api/')) {
     let body = {};
     if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-      try { body = JSON.parse(await readBody(req)); } catch {}
+      try { body = JSON.parse(await readBody(req)); } catch (err) {
+        if (sendBodyTooLargeIfNeeded(res, err, 'dashboard')) return;
+      }
     }
     const subpath = path.slice('/dashboard/api'.length);
     return handleDashboardApi(method, subpath, body, req, res);
@@ -251,7 +287,8 @@ async function route(req, res) {
 
   if (path === '/auth/login' && method === 'POST') {
     let body;
-    try { body = JSON.parse(await readBody(req)); } catch {
+    try { body = JSON.parse(await readBody(req)); } catch (err) {
+      if (sendBodyTooLargeIfNeeded(res, err, 'legacy')) return;
       return json(res, 400, { error: 'Invalid JSON' });
     }
 
@@ -334,7 +371,8 @@ async function route(req, res) {
     }
 
     let body;
-    try { body = JSON.parse(await readBody(req)); } catch {
+    try { body = JSON.parse(await readBody(req)); } catch (err) {
+      if (sendBodyTooLargeIfNeeded(res, err, 'openai')) return;
       return json(res, 400, { error: { message: 'Invalid JSON', type: 'invalid_request' } });
     }
     if (!Array.isArray(body.messages)) {
@@ -392,7 +430,8 @@ async function route(req, res) {
     }
 
     let body;
-    try { body = JSON.parse(await readBody(req)); } catch {
+    try { body = JSON.parse(await readBody(req)); } catch (err) {
+      if (sendBodyTooLargeIfNeeded(res, err, 'openai')) return;
       return json(res, 400, { error: { message: 'Invalid JSON', type: 'invalid_request' } });
     }
     if (body.input == null) {
@@ -435,7 +474,8 @@ async function route(req, res) {
       return json(res, 503, { type: 'error', error: { type: 'api_error', message: 'No active accounts' } });
     }
     let body;
-    try { body = JSON.parse(await readBody(req)); } catch {
+    try { body = JSON.parse(await readBody(req)); } catch (err) {
+      if (sendBodyTooLargeIfNeeded(res, err, 'anthropic')) return;
       return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'Invalid JSON' } });
     }
     if (!Array.isArray(body.messages) || body.messages.length === 0) {

@@ -13,8 +13,9 @@
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { isStickyEnabled, getStickyBinding, setStickyBinding, clearStickyBinding } from './account/sticky-session.js';
 import { isExperimentalEnabled } from './runtime-config.js';
-import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, readdirSync } from 'fs';
 import { config, log } from './config.js';
+import { renameSyncWithRetry } from './fs-atomic.js';
 import { getEffectiveProxy } from './dashboard/proxy-config.js';
 import { getTierModels, getModelKeysByEnum, MODELS, registerDiscoveredFreeModel } from './models.js';
 import { getLsAdmissionStatus, getLsMaintenanceRequests } from './langserver.js';
@@ -247,13 +248,14 @@ function _serializeAccounts() {
 function saveAccounts() {
   if (_saveInFlight) { _savePending = true; return; }
   _saveInFlight = true;
-  const tempFile = ACCOUNTS_FILE + '.tmp';
+  const tempFile = `${ACCOUNTS_FILE}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   try {
-    // Atomic write: write to .tmp then rename so a crash mid-write can't
-    // leave accounts.json truncated/corrupt. Node's renameSync is atomic
-    // on POSIX and replaces the target on Windows (fs.rename behavior).
+    // Atomic write: write to a unique sibling tmp then rename so a crash
+    // mid-write cannot leave accounts.json truncated/corrupt. The unique
+    // tmp also prevents concurrent test/process saves from racing on the
+    // same `${ACCOUNTS_FILE}.tmp` name.
     writeFileSync(tempFile, JSON.stringify(_serializeAccounts(), null, 2));
-    renameSync(tempFile, ACCOUNTS_FILE);
+    renameSyncWithRetry(tempFile, ACCOUNTS_FILE);
   } catch (e) {
     log.error('Failed to save accounts:', e.message);
     try { unlinkSync(tempFile); } catch {}
@@ -271,10 +273,10 @@ function saveAccounts() {
  * atomic.
  */
 export function saveAccountsSync() {
-  const tempFile = ACCOUNTS_FILE + '.shutdown.tmp';
+  const tempFile = `${ACCOUNTS_FILE}.${process.pid}.shutdown.tmp`;
   try {
     writeFileSync(tempFile, JSON.stringify(_serializeAccounts(), null, 2));
-    renameSync(tempFile, ACCOUNTS_FILE);
+    renameSyncWithRetry(tempFile, ACCOUNTS_FILE);
   } catch (e) {
     log.error('Shutdown: failed to flush accounts:', e.message);
     try { unlinkSync(tempFile); } catch {}
@@ -318,7 +320,7 @@ export function migrateReplicaAccountsTo({ sharedDir, accountsFile, logger = log
   const tempFile = accountsFile + '.migrate.tmp';
   try {
     writeFileSync(tempFile, JSON.stringify([...merged.values()], null, 2));
-    renameSync(tempFile, accountsFile);
+    renameSyncWithRetry(tempFile, accountsFile);
     logger.warn?.(`Migrated ${merged.size} account(s) from ${scanned} replica-* subdir(s) into ${accountsFile} (issue #67)`);
     return { migrated: merged.size, scanned, skipped: false };
   } catch (e) {

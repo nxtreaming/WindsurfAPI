@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractToken } from '../src/server.js';
+import { bodyTooLargePayload, extractToken, readBody } from '../src/server.js';
+import { EventEmitter } from 'node:events';
 
 describe('server auth token extraction', () => {
   it('parses Bearer authorization case-insensitively and trims the token', () => {
@@ -15,5 +16,37 @@ describe('server auth token extraction', () => {
 
   it('falls through to x-api-key when Authorization is absent', () => {
     assert.equal(extractToken({ headers: { 'x-api-key': 'fallback-key' } }), 'fallback-key');
+  });
+});
+
+describe('server body parsing', () => {
+  it('preserves request-body-too-large as a 413-class error', async () => {
+    const req = new EventEmitter();
+    req.resume = () => {};
+
+    const promise = readBody(req);
+    req.emit('data', Buffer.alloc(10 * 1024 * 1024 + 1));
+    req.emit('end');
+
+    await assert.rejects(promise, (err) => {
+      assert.equal(err.statusCode, 413);
+      assert.equal(err.code, 'ERR_REQUEST_BODY_TOO_LARGE');
+      return true;
+    });
+  });
+
+  it('keeps oversized body payloads protocol-shaped instead of Invalid JSON', () => {
+    assert.deepEqual(bodyTooLargePayload('openai'), {
+      error: { message: 'Request body too large', type: 'invalid_request' },
+    });
+    assert.deepEqual(bodyTooLargePayload('anthropic'), {
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'Request body too large' },
+    });
+    assert.deepEqual(bodyTooLargePayload('dashboard'), {
+      ok: false,
+      error: 'ERR_REQUEST_BODY_TOO_LARGE',
+      message: 'Request body too large',
+    });
   });
 });

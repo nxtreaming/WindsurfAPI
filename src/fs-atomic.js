@@ -9,7 +9,7 @@
  * silently falls back to defaults — user loses every persisted
  * setting, model-access list, proxy config, etc.
  *
- * Pattern: write the new contents to a sibling `${target}.tmp` first,
+ * Pattern: write the new contents to a unique sibling `${target}.*.tmp` first,
  * then `rename(2)` it onto the target. rename is atomic on POSIX and
  * replaces an existing target on Windows (per Node's documented
  * fs.renameSync behavior). A crash between writeFileSync(tmp) and
@@ -25,13 +25,35 @@
  * because it has its own coalescing/_saveInFlight machinery).
  */
 
+import { randomUUID } from 'node:crypto';
 import { writeFileSync, renameSync, unlinkSync } from 'node:fs';
 
+const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EBUSY']);
+
+function sleepSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {}
+}
+
+export function renameSyncWithRetry(sourcePath, targetPath, { attempts = 6, baseDelayMs = 10 } = {}) {
+  const maxAttempts = Math.max(1, attempts | 0);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      renameSync(sourcePath, targetPath);
+      return;
+    } catch (err) {
+      if (!RETRYABLE_RENAME_CODES.has(err?.code) || attempt === maxAttempts) throw err;
+      sleepSync(baseDelayMs * attempt);
+    }
+  }
+}
+
 export function writeJsonAtomic(targetPath, value, { spaces = 2 } = {}) {
-  const tmp = `${targetPath}.tmp`;
+  const tmp = `${targetPath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(value, null, spaces));
-    renameSync(tmp, targetPath);
+    renameSyncWithRetry(tmp, targetPath);
   } catch (err) {
     try { unlinkSync(tmp); } catch {}
     throw err;

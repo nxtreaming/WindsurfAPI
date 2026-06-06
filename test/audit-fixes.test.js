@@ -33,9 +33,10 @@ describe('writeJsonAtomic (audit fix #1: durable config writes)', () => {
       const target = join(dir, 'config.json');
       writeJsonAtomic(target, { hello: 'world', n: 1 });
       assert.deepEqual(JSON.parse(readFileSync(target, 'utf8')), { hello: 'world', n: 1 });
-      // The .tmp sibling must NOT exist after a successful write —
+      // Tmp siblings must NOT exist after a successful write —
       // otherwise we'd leak garbage into DATA_DIR every save.
-      assert.ok(!existsSync(`${target}.tmp`), '.tmp file should be removed after rename');
+      const leftover = readdirSync(dir).filter(f => f.endsWith('.tmp'));
+      assert.deepEqual(leftover, [], `expected no .tmp leftovers, got ${leftover.join(',')}`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

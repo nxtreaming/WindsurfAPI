@@ -18,6 +18,7 @@ import {
   parseTrajectoryInfo,
   parseTrajectorySteps,
 } from '../src/windsurf.js';
+import { isReadUrlAutoApproveAllowed } from '../src/client.js';
 import { writeMessageField, writeVarintField, writeStringField } from '../src/proto.js';
 import { buildToolPreambleForProto } from '../src/handlers/tool-emulation.js';
 
@@ -291,6 +292,28 @@ describe('parseTrajectorySteps recognises propose_code + search_web (v2.0.70)', 
     assert.equal(calls[0].result, 'markdown chunk text');
   });
 
+  it('does not promote unconfirmed read_url_content top-level field 5 unless lab fallback is enabled', () => {
+    const original = process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_READ_URL_LEGACY_SUMMARY;
+    delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_READ_URL_LEGACY_SUMMARY;
+    try {
+      const body = Buffer.concat([
+        writeStringField(1, 'https://example.com/legacy'),
+        writeStringField(5, 'legacy field 5 body'),
+      ]);
+      const resp = wrapResp(wrapStep(40, 40, body));
+      let calls = parseTrajectorySteps(resp)[0].toolCalls.filter(tc => tc.cascade_native);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].result, '');
+
+      process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_READ_URL_LEGACY_SUMMARY = '1';
+      calls = parseTrajectorySteps(resp)[0].toolCalls.filter(tc => tc.cascade_native);
+      assert.equal(calls[0].result, 'legacy field 5 body');
+    } finally {
+      if (original === undefined) delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_READ_URL_LEGACY_SUMMARY;
+      else process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_READ_URL_LEGACY_SUMMARY = original;
+    }
+  });
+
   it('read_url_content waiting step exposes requested interaction metadata', () => {
     const spec = Buffer.concat([
       writeStringField(1, 'https://example.com/'),
@@ -313,6 +336,30 @@ describe('parseTrajectorySteps recognises propose_code + search_web (v2.0.70)', 
       origin: 'https://example.com',
     });
     assert.deepEqual(steps[0].toolCalls, []);
+  });
+});
+
+describe('WebFetch auto-approve allowlist canonicalization', () => {
+  it('allows canonical matching origins and exact URLs only', () => {
+    const prevEnabled = process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE;
+    const prevOrigins = process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE_ORIGINS;
+    try {
+      process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE = '1';
+      process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE_ORIGINS =
+        'https://example.com,https://docs.example.com/path/';
+
+      assert.equal(isReadUrlAutoApproveAllowed('https://example.com/a#frag', 'https://example.com/'), true);
+      assert.equal(isReadUrlAutoApproveAllowed('https://docs.example.com/path/#frag', ''), true);
+      assert.equal(isReadUrlAutoApproveAllowed('https://docs.example.com/path/child', ''), false);
+      assert.equal(isReadUrlAutoApproveAllowed('ftp://example.com/a', 'ftp://example.com'), false);
+      assert.equal(isReadUrlAutoApproveAllowed('https://user:pass@example.com/a', 'https://example.com'), false);
+      assert.equal(isReadUrlAutoApproveAllowed('https://evil.example/a', 'https://example.com'), false);
+    } finally {
+      if (prevEnabled === undefined) delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE;
+      else process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE = prevEnabled;
+      if (prevOrigins === undefined) delete process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE_ORIGINS;
+      else process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE_ORIGINS = prevOrigins;
+    }
   });
 });
 

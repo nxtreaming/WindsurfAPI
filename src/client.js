@@ -73,12 +73,38 @@ function csvSetEnv(name) {
     .filter(Boolean));
 }
 
-function isReadUrlAutoApproveAllowed(url, origin) {
+function canonicalWebUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  let parsed;
+  try { parsed = new URL(raw); } catch { return null; }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  if (parsed.username || parsed.password) return null;
+  parsed.hash = '';
+  return {
+    origin: parsed.origin,
+    href: parsed.href.replace(/\/+$/, ''),
+  };
+}
+
+export function isReadUrlAutoApproveAllowed(url, origin) {
   if (process.env.WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE !== '1') return false;
   const allow = csvSetEnv('WINDSURFAPI_NATIVE_TOOL_BRIDGE_WEBFETCH_AUTO_APPROVE_ORIGINS');
   if (!allow.size) return false;
-  const candidates = [origin, url].map(v => String(v || '').trim()).filter(Boolean);
-  return candidates.some(v => allow.has(v) || allow.has(v.replace(/\/+$/, '')));
+  const requestUrl = canonicalWebUrl(url);
+  if (!requestUrl) return false;
+  const originHint = canonicalWebUrl(origin)?.origin || '';
+  if (originHint && originHint !== requestUrl.origin) return false;
+  for (const entry of allow) {
+    const allowed = canonicalWebUrl(entry);
+    if (!allowed) continue;
+    if (allowed.href === allowed.origin) {
+      if (allowed.origin === requestUrl.origin) return true;
+      continue;
+    }
+    if (allowed.href === requestUrl.href) return true;
+  }
+  return false;
 }
 
 function isImageLikeBlock(part) {
