@@ -37,6 +37,17 @@ const DEPLOYER_IMAGE = 'docker:24-cli';
 // auto-refresh JS to land; longer waits just confuse the UX.
 const DEPLOYER_DELAY_SECONDS = 8;
 
+// Defence-in-depth (audit #2): compose labels come from the container
+// runtime and the file's own contract says not to trust them blindly.
+// shellQuote() already makes them shell-safe; these validators reject
+// malformed/hostile shapes so they can't reach the deployer command at all.
+export function isSafeComposeProject(name) {
+  return typeof name === 'string' && name.length <= 256 && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name);
+}
+export function isSafeComposeWorkingDir(dir) {
+  return typeof dir === 'string' && dir.length <= 4096 && /^\/[^\0\r\n]*$/.test(dir);
+}
+
 /**
  * Resolve our own container ID. Try /etc/hostname first (default in
  * docker; first 12 chars of the container ID), then /proc/self/cgroup
@@ -157,6 +168,14 @@ export async function detectDockerSelfUpdate() {
       available: false,
       reason: 'no-compose-labels',
       detail: 'container has no com.docker.compose.* labels — was it started via `docker run` instead of `docker compose up`?',
+      image, selfId,
+    };
+  }
+  if (!isSafeComposeProject(project) || !isSafeComposeWorkingDir(workingDir)) {
+    return {
+      available: false,
+      reason: 'unsafe-compose-labels',
+      detail: 'compose project / working_dir label failed safety validation',
       image, selfId,
     };
   }

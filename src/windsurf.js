@@ -989,7 +989,10 @@ export function parseTrajectoryStatus(buf) {
  *   Step.field 20: planner_response { field 1: response, field 3: thinking }
  */
 export function parseTrajectorySteps(buf) {
-  const fields = parseFields(buf);
+  // Robustness (audit #1): a malformed/hostile upstream payload must not
+  // throw out of the parser. Degrade to "no steps" on a bad root buffer.
+  let fields;
+  try { fields = parseFields(buf); } catch { return []; }
   const steps = getAllFields(fields, 1).filter(f => f.wireType === 2);
   const results = [];
 
@@ -1030,6 +1033,9 @@ export function parseTrajectorySteps(buf) {
   };
 
   for (const step of steps) {
+   // Robustness (audit #1): skip a single malformed step instead of
+   // discarding the whole trajectory when one nested field is corrupt.
+   try {
     const sf = parseFields(step.value);
     const typeField = getField(sf, 1, 0);
     const statusField = getField(sf, 4, 0);
@@ -1370,6 +1376,7 @@ export function parseTrajectorySteps(buf) {
 
 
     results.push(entry);
+   } catch { continue; }
   }
 
   return results;

@@ -86,6 +86,11 @@ let META_TAG_RE = buildMetaTagRe();
 
 function stripMetaTags(s) {
   if (typeof s !== 'string' || !s) return s;
+  // ReDoS/CPU bound (audit #3): META_TAG_RE uses a backreference + lazy body
+  // which is quadratic on inputs with many unclosed meta-tag openings. This
+  // output only feeds the reuse fingerprint, so bounding the scanned length
+  // on pathological inputs is safe (worst case is a fingerprint cache miss).
+  if (s.length > 262144) s = s.slice(0, 262144);
   const stripped = s.replace(META_TAG_RE, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   // Unknown tags are caller content. Never learn them into the global
   // stripping set or fingerprints stop being a pure function of the request.

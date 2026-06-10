@@ -314,6 +314,11 @@ function userPromptLooksActionable(lastUserText) {
  */
 export function detectToolIntentInNarrative(text, tools, opts = {}) {
   if (typeof text !== 'string' || !text.trim()) return null;
+  // ReDoS/CPU bound (audit #3): this scans the full text once per declared
+  // tool name, so a pathologically large model output could drive the
+  // per-name regex loop into a polynomial blow-up. Cap the scanned length;
+  // NLU recovery is best-effort so operating on a prefix is acceptable.
+  if (text.length > 200_000) text = text.slice(0, 200_000);
   if (!Array.isArray(tools) || !tools.length) return null;
   const lastUserText = opts.lastUserText || '';
   if (!userPromptLooksActionable(lastUserText)) return null;
@@ -348,6 +353,9 @@ export function detectToolIntentInNarrative(text, tools, opts = {}) {
 export function extractIntentFromNarrative(text, tools, opts = {}) {
   if (process.env.WINDSURFAPI_NLU_RECOVERY === '0') return [];
   if (typeof text !== 'string' || !text.trim()) return [];
+  // ReDoS/CPU bound (audit #3, see detectToolIntentInNarrative): cap the
+  // scanned length before the per-tool-name regex layers run.
+  if (text.length > 200_000) text = text.slice(0, 200_000);
   if (!Array.isArray(tools) || !tools.length) return [];
   const lastUserText = opts.lastUserText || '';
   const minConfidence = typeof opts.minConfidence === 'number' ? opts.minConfidence : 0.65;
