@@ -14,7 +14,7 @@ set -euo pipefail
 OUR_RELEASE='https://github.com/dwgx/WindsurfAPI/releases/latest/download'
 EXAFUNCTION_API='https://api.github.com/repos/Exafunction/codeium/releases/latest'
 # v2.0.93: windsurf-linux-server-release extracts LS from official Windsurf desktop builds.
-WINDSURF_LS_RELEASE='https://github.com/CaiJingLong/windsurf-linux-server-release/releases/latest/download'
+WINDSURF_LS_RELEASE="${WINDSURFAPI_LS_RELEASE:-https://github.com/CaiJingLong/windsurf-linux-server-release/releases/latest/download}"
 
 log() { echo -e "\033[1;34m==>\033[0m $*"; }
 err() { echo -e "\033[1;31m!!\033[0m  $*" >&2; }
@@ -81,10 +81,11 @@ else
   else
     log "Not found in our release, trying windsurf-linux-server-release..."
     ws_url="${WINDSURF_LS_RELEASE}/${ASSET}"
-    if curl -fL --progress-bar -o "$TMP_TARGET" "$ws_url" 2>/dev/null; then
-      log "Downloaded from windsurf-linux-server-release (fresh WindSurf build)"
+    log "Trying Windsurf desktop LS release: $ws_url"
+    if curl -fL --progress-bar -o "$TMP_TARGET" "$ws_url"; then
+      log "Downloaded from Windsurf desktop LS release"
     else
-      log "Not found there either, falling back to Exafunction..."
+      log "Not found in Windsurf desktop LS release, falling back to Exafunction..."
       if command -v jq >/dev/null 2>&1; then
         url="$(curl -fsSL "$EXAFUNCTION_API" | jq -r \
           --arg asset "$ASSET" '.assets[] | select(.name == $asset) | .browser_download_url')"

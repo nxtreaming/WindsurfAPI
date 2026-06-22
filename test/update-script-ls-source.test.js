@@ -47,5 +47,15 @@ describe('update.sh language-server source selection', () => {
       /CaiJingLong\/windsurf-linux-server-release/,
       'install-ls.sh should keep the third-party Windsurf desktop LS release source'
     );
+    assert.match(
+      INSTALL_LS,
+      /WINDSURFAPI_LS_RELEASE/,
+      'install-ls.sh should allow operators to override the LS release mirror/source'
+    );
+    assert.match(
+      INSTALL_LS,
+      /Trying Windsurf desktop LS release: \$ws_url/,
+      'install-ls.sh should print the fallback URL so large macOS downloads do not look hung'
+    );
   });
 });
