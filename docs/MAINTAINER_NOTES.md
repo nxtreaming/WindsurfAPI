@@ -29,6 +29,10 @@ resets. They are not release notes.
 - For LS install/update reports, ask for OS/arch, `install-ls.sh` output, asset
   URL selected, `WINDSURFAPI_LS_RELEASE` if set, file size/hash when available,
   and whether the target binary was live/in use.
+- Default LS fallback source is the maintained
+  `dwgx/windsurf-ls-release` mirror. Keep `WINDSURFAPI_LS_RELEASE` as the
+  operator override, and verify any mirror change with a published release plus
+  a Linux smoke before calling the issue closed.
 - If the reporter writes in Chinese, Vietnamese, or another language already
   used in the issue, reply in that language when practical. Keep technical
   identifiers unchanged.

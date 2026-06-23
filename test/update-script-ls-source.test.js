@@ -41,11 +41,16 @@ describe('update.sh language-server source selection', () => {
     );
   });
 
-  test('install-ls.sh knows the fresh Windsurf desktop LS fallback source', () => {
+  test('install-ls.sh defaults to the maintained Windsurf desktop LS mirror', () => {
     assert.match(
       INSTALL_LS,
+      /dwgx\/windsurf-ls-release/,
+      'install-ls.sh should default to the maintained Windsurf desktop LS release mirror'
+    );
+    assert.doesNotMatch(
+      INSTALL_LS,
       /CaiJingLong\/windsurf-linux-server-release/,
-      'install-ls.sh should keep the third-party Windsurf desktop LS release source'
+      'install-ls.sh must not default to the stale third-party mirror'
     );
     assert.match(
       INSTALL_LS,

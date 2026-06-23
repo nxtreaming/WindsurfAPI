@@ -13,8 +13,8 @@ set -euo pipefail
 
 OUR_RELEASE='https://github.com/dwgx/WindsurfAPI/releases/latest/download'
 EXAFUNCTION_API='https://api.github.com/repos/Exafunction/codeium/releases/latest'
-# v2.0.93: windsurf-linux-server-release extracts LS from official Windsurf desktop builds.
-WINDSURF_LS_RELEASE="${WINDSURFAPI_LS_RELEASE:-https://github.com/CaiJingLong/windsurf-linux-server-release/releases/latest/download}"
+# Maintained mirror for LS binaries extracted from official Windsurf/Devin Desktop builds.
+WINDSURF_LS_RELEASE="${WINDSURFAPI_LS_RELEASE:-https://github.com/dwgx/windsurf-ls-release/releases/latest/download}"
 
 log() { echo -e "\033[1;34m==>\033[0m $*"; }
 err() { echo -e "\033[1;31m!!\033[0m  $*" >&2; }
@@ -79,7 +79,7 @@ else
   if curl -fL --progress-bar -o "$TMP_TARGET" "$our_url" 2>/dev/null; then
     log "Downloaded from WindsurfAPI release"
   else
-    log "Not found in our release, trying windsurf-linux-server-release..."
+    log "Not found in our release, trying maintained Windsurf LS mirror..."
     ws_url="${WINDSURF_LS_RELEASE}/${ASSET}"
     log "Trying Windsurf desktop LS release: $ws_url"
     if curl -fL --progress-bar -o "$TMP_TARGET" "$ws_url"; then
