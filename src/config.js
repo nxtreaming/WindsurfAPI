@@ -30,7 +30,9 @@ function loadEnv() {
   }
 }
 
-loadEnv();
+if (process.env.WINDSURFAPI_SKIP_DOTENV !== '1') {
+  loadEnv();
+}
 
 // `sharedDataDir` is the cluster-shared root: a single accounts.json lives
 // here so add-account writes from any replica are visible to every replica

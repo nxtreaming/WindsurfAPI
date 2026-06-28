@@ -2,9 +2,10 @@
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DEFAULT_TIMEOUT_MS = 90_000;
+const TEST_SETUP = pathToFileURL(resolve(process.cwd(), 'test/setup-env.mjs')).href;
 
 export function parseArgs(argv) {
   const positional = [];
@@ -53,7 +54,7 @@ export function selectShard(files, shardIndex, shardTotal) {
 
 function runOne(file, timeoutMs) {
   return new Promise(resolveRun => {
-    const child = spawn(process.execPath, ['--test', '--test-force-exit', file], {
+    const child = spawn(process.execPath, ['--import', TEST_SETUP, '--test', '--test-force-exit', file], {
       cwd: process.cwd(),
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
