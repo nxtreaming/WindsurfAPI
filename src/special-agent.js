@@ -92,18 +92,55 @@ function textFromContent(content) {
     .join('\n');
 }
 
+/**
+ * Render chat messages into a single prompt for the special-agent backend.
+ *
+ * The backend takes ONE text prompt per session/prompt call, so a multi-turn
+ * chat has to be flattened. Two shapes:
+ *   - Single turn (one user message, no prior assistant/tool turns): send the
+ *     user's text as-is (optionally prefixed with system instructions). No role
+ *     labels — it's just a prompt, and labels would be noise.
+ *   - Multi-turn: render the prior turns as a labeled transcript, then call out
+ *     the latest message and instruct the agent to continue AS THE ASSISTANT.
+ *     Without this framing the agent tends to summarize/react to the whole
+ *     transcript instead of answering the last turn.
+ *
+ * System messages are pulled out of the turn flow and surfaced as explicit
+ * instructions, mirroring how real chat APIs treat the system role.
+ */
 export function buildSpecialAgentPrompt(messages) {
-  const lines = [];
-  for (const m of Array.isArray(messages) ? messages : []) {
+  const list = Array.isArray(messages) ? messages : [];
+  const systemParts = [];
+  const turns = [];
+  for (const m of list) {
     const role = m?.role || 'user';
     const text = textFromContent(m?.content).trim();
     if (!text) continue;
-    if (role === 'system') lines.push(`System:\n${text}`);
-    else if (role === 'assistant') lines.push(`Assistant:\n${text}`);
-    else if (role === 'tool') lines.push(`Tool result:\n${text}`);
-    else lines.push(`User:\n${text}`);
+    if (role === 'system') { systemParts.push(text); continue; }
+    turns.push({ role, text });
   }
-  return lines.join('\n\n').trim();
+
+  const systemBlock = systemParts.length ? `System instructions:\n${systemParts.join('\n\n')}` : '';
+  const label = r => (r === 'assistant' ? 'Assistant' : r === 'tool' ? 'Tool result' : 'User');
+
+  const priorTurns = turns.slice(0, -1);
+  const last = turns[turns.length - 1];
+
+  // Single turn (no prior conversation): just the user's text + optional system.
+  if (priorTurns.length === 0) {
+    return [systemBlock, last ? last.text : ''].filter(Boolean).join('\n\n').trim();
+  }
+
+  // Multi-turn: labeled history, highlighted latest message, continuation cue.
+  const history = priorTurns.map(t => `${label(t.role)}:\n${t.text}`).join('\n\n');
+  const instruction = 'Continue this conversation. Reply as the assistant to the latest message, using the prior turns as context.';
+  return [
+    systemBlock,
+    'Conversation so far:',
+    history,
+    `Latest ${label(last.role)} message:\n${last.text}`,
+    instruction,
+  ].filter(Boolean).join('\n\n').trim();
 }
 
 function hasUnsupportedMedia(messages) {

@@ -120,8 +120,8 @@ describe('special-agent model routing', () => {
     assert.equal(result.status, 200);
     assert.equal(result.body.model, 'swe-1.6-fast');
     assert.equal(result.body.choices[0].message.content, 'SPECIAL_OK');
-    assert.match(seenPrompt, /System:\nbe direct/);
-    assert.match(seenPrompt, /User:\nship the smallest PoC/);
+    assert.match(seenPrompt, /System instructions:\nbe direct/);
+    assert.match(seenPrompt, /ship the smallest PoC/);
   });
 
   it('routes acp mode through the ACP runner with account-pool credentials', async () => {
@@ -153,7 +153,7 @@ describe('special-agent model routing', () => {
 
     assert.equal(result.status, 200);
     assert.equal(result.body.choices[0].message.content, 'ACP_OK');
-    assert.match(seenPrompt, /User:\nuse ACP/);
+    assert.equal(seenPrompt, 'use ACP');
     assert.equal(released, true);
   });
 
@@ -511,18 +511,58 @@ describe('special-agent wrapper routes', () => {
 });
 
 describe('special-agent prompt/status helpers', () => {
-  it('builds a compact text prompt from chat messages', () => {
+  it('builds a multi-turn prompt with labeled history and a continuation cue', () => {
     const prompt = buildSpecialAgentPrompt([
       { role: 'system', content: 'system rules' },
       user([{ type: 'text', text: 'hello' }, { type: 'image_url', image_url: { url: 'x' } }]),
       { role: 'assistant', content: 'prior answer' },
       { role: 'tool', content: 'tool output' },
+      user('latest question'),
     ]);
-    assert.match(prompt, /System:\nsystem rules/);
+    assert.match(prompt, /System instructions:\nsystem rules/);
+    assert.match(prompt, /Conversation so far:/);
     assert.match(prompt, /User:\nhello/);
     assert.match(prompt, /\[image omitted/);
     assert.match(prompt, /Assistant:\nprior answer/);
     assert.match(prompt, /Tool result:\ntool output/);
+    // Latest turn is called out separately, and the agent is told to continue.
+    assert.match(prompt, /Latest User message:\nlatest question/);
+    assert.match(prompt, /Reply as the assistant to the latest message/);
+  });
+
+  it('sends a single-turn prompt as plain text (no role labels)', () => {
+    const prompt = buildSpecialAgentPrompt([user('just one question')]);
+    assert.equal(prompt, 'just one question');
+    assert.doesNotMatch(prompt, /User:/);
+    assert.doesNotMatch(prompt, /Conversation so far/);
+  });
+
+  it('prefixes a single-turn prompt with system instructions but no turn labels', () => {
+    const prompt = buildSpecialAgentPrompt([
+      { role: 'system', content: 'be terse' },
+      user('the question'),
+    ]);
+    assert.match(prompt, /System instructions:\nbe terse/);
+    assert.match(prompt, /the question/);
+    assert.doesNotMatch(prompt, /Conversation so far/);
+    assert.doesNotMatch(prompt, /Latest User message/);
+  });
+
+  it('merges multiple system messages and keeps them out of the turn flow', () => {
+    const prompt = buildSpecialAgentPrompt([
+      { role: 'system', content: 'rule one' },
+      { role: 'system', content: 'rule two' },
+      user('first'),
+      { role: 'assistant', content: 'ack' },
+      user('second'),
+    ]);
+    assert.match(prompt, /System instructions:\nrule one\n\nrule two/);
+    assert.match(prompt, /Latest User message:\nsecond/);
+  });
+
+  it('returns an empty string when there are no usable messages', () => {
+    assert.equal(buildSpecialAgentPrompt([]), '');
+    assert.equal(buildSpecialAgentPrompt([{ role: 'user', content: '   ' }]), '');
   });
 
   it('reports disabled status by default', () => {
