@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+/**
+ * DEVIN_CONNECT smoke — end-to-end check of the direct cloud GetChatMessage
+ * adapter through the public OpenAI/Anthropic surfaces.
+ *
+ * Stages:
+ *   0. Entitlement preflight (zero-billable): GetUserStatus + GetCliModelConfigs
+ *      via the direct catalog probe. Prints the account tier and the selectors
+ *      it can name. No chat turn, so no allowance is spent.
+ *   1. /v1/chat/completions non-stream on the free selector (swe-1-6-slow).
+ *   2. /v1/chat/completions streaming — SSE deltas + [DONE].
+ *   3. Multi-turn — prior assistant turn is honored.
+ *   4. /v1/messages (Anthropic dialect) over the same connect backend.
+ *   5. Error classification — a paid selector on a free account must surface a
+ *      clean 402/401 (MODEL_BLOCKED/UNAUTHORIZED), not an opaque 500.
+ *
+ * Paid-account verification (#15): set CONNECT_SMOKE_PAID_MODEL=claude-opus-4.8
+ * (or any paid selector). On a paid account stage 5 flips to expect a 200 with
+ * real content — the one-command confirmation that paid routing works.
+ *
+ * Env:
+ *   BASE_URL                       server base (default http://127.0.0.1:3003)
+ *   API_KEY                        downstream auth (default 'test')
+ *   CONNECT_SMOKE_TOKEN            devin session token for the direct preflight;
+ *                                  falls back to accounts.json[0] then DEVIN_* env
+ *   CONNECT_SMOKE_FREE_MODEL       free selector (default swe-1-6-slow)
+ *   CONNECT_SMOKE_PAID_MODEL       paid selector to probe (default claude-opus-4.8)
+ *   CONNECT_SMOKE_REAL_CALLS=0     skip billable chat stages (preflight only)
+ *   CONNECT_SMOKE_TIMEOUT_MS       per-request timeout (default 120000)
+ */
+
+import { readFileSync } from 'fs';
+import { fetchCatalog, fetchUserStatus } from '../src/devin-connect-catalog.js';
+
+const baseUrl = (process.env.BASE_URL || process.env.WINDSURFAPI_BASE_URL || 'http://127.0.0.1:3003').replace(/\/+$/, '');
+const apiKey = process.env.API_KEY || process.env.WINDSURFAPI_API_KEY || 'test';
+const freeModel = process.env.CONNECT_SMOKE_FREE_MODEL || 'swe-1-6-slow';
+const paidModel = process.env.CONNECT_SMOKE_PAID_MODEL || 'claude-opus-4.8';
+const realCalls = process.env.CONNECT_SMOKE_REAL_CALLS !== '0';
+const requestTimeoutMs = Math.max(5_000, Number(process.env.CONNECT_SMOKE_TIMEOUT_MS || 120_000));
+
+function resolveToken() {
+  if (process.env.CONNECT_SMOKE_TOKEN) return process.env.CONNECT_SMOKE_TOKEN;
+  for (const k of ['DEVIN_CONNECT_TOKEN', 'DEVIN_SESSION_TOKEN', 'WINDSURF_SESSION_TOKEN']) {
+    if (process.env[k]) return process.env[k];
+  }
+  // Last resort: first persisted account (local dev convenience).
+  try {
+    const accounts = JSON.parse(readFileSync(new URL('../accounts.json', import.meta.url), 'utf8'));
+    const a = accounts.find((x) => String(x.apiKey || '').startsWith('devin-session-token$'));
+    if (a) return a.apiKey;
+  } catch { /* none */ }
+  return '';
+}
+
+function compact(text, max = 600) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return s.length > max ? `${s.slice(0, max)}...<+${s.length - max}>` : s;
+}
+
+async function postJson(path, payload) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { /* keep text */ }
+    return { status: res.status, body, text };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postSSE(path, payload) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const dataLines = [];
+  try {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      return { status: res.status, dataLines, error: text };
+    }
+    const decoder = new TextDecoder();
+    let buf = '';
+    for await (const chunk of res.body) {
+      buf += decoder.decode(chunk, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trimEnd();
+        buf = buf.slice(nl + 1);
+        if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      }
+    }
+    return { status: res.status, dataLines };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const results = [];
+function record(stage, ok, detail) {
+  results.push({ stage, ok, ...detail });
+  const tag = ok ? 'PASS' : 'FAIL';
+  console.log(`[${tag}] ${stage}${detail?.note ? ` — ${detail.note}` : ''}`);
+}
+
+// ─── Stage 0: entitlement preflight (zero-billable) ─────────────────────────
+const token = resolveToken();
+let isPaid = false;
+if (!token) {
+  record('preflight', false, { note: 'no devin session token (set CONNECT_SMOKE_TOKEN or persist an account)' });
+} else {
+  try {
+    const status = await fetchUserStatus({ token });
+    isPaid = status.isPaid;
+    const catalog = await fetchCatalog({ token });
+    const byProvider = catalog.reduce((acc, m) => { (acc[m.provider] ||= []).push(m.selector); return acc; }, {});
+    record('preflight', true, {
+      note: `tier=${status.plan} paid=${status.isPaid} models=${catalog.length}`,
+      plan: status.plan,
+      isPaid: status.isPaid,
+      providers: Object.fromEntries(Object.entries(byProvider).map(([p, s]) => [p, s.length])),
+    });
+  } catch (err) {
+    record('preflight', false, { note: `${err.code || 'ERR'}: ${err.message}` });
+  }
+}
+
+// ─── Billable chat stages ───────────────────────────────────────────────────
+if (!realCalls) {
+  console.log('\n[skip] CONNECT_SMOKE_REAL_CALLS=0 — chat stages skipped (preflight only).');
+} else {
+  // Stage 1: non-stream
+  const r1 = await postJson('/v1/chat/completions', {
+    model: freeModel, stream: false,
+    messages: [{ role: 'user', content: 'reply with exactly: CONNECT_OK' }],
+  });
+  const c1 = r1.body?.choices?.[0]?.message?.content;
+  record('non-stream', r1.status === 200 && /CONNECT_OK/i.test(c1 || ''), {
+    note: `status=${r1.status} content="${compact(c1, 80)}"`,
+    usage: r1.body?.usage,
+  });
+
+  // Stage 2: streaming
+  const r2 = await postSSE('/v1/chat/completions', {
+    model: freeModel, stream: true,
+    messages: [{ role: 'user', content: 'count: one two three' }],
+  });
+  const deltas = r2.dataLines.filter((l) => l && l !== '[DONE]');
+  const sawDone = r2.dataLines.includes('[DONE]');
+  record('stream', r2.status === 200 && deltas.length > 0 && sawDone, {
+    note: `status=${r2.status} deltas=${deltas.length} done=${sawDone}`,
+  });
+
+  // Stage 3: multi-turn
+  const r3 = await postJson('/v1/chat/completions', {
+    model: freeModel, stream: false,
+    messages: [
+      { role: 'user', content: 'My favorite color is teal. Remember it.' },
+      { role: 'assistant', content: 'Got it, teal.' },
+      { role: 'user', content: 'What is my favorite color? One word.' },
+    ],
+  });
+  const c3 = r3.body?.choices?.[0]?.message?.content;
+  record('multi-turn', r3.status === 200 && /teal/i.test(c3 || ''), {
+    note: `status=${r3.status} content="${compact(c3, 80)}"`,
+  });
+
+  // Stage 4: Anthropic /v1/messages over the same backend
+  const r4 = await postJson('/v1/messages', {
+    model: freeModel, max_tokens: 64, stream: false,
+    messages: [{ role: 'user', content: 'reply with exactly: MSG_OK' }],
+  });
+  const c4 = Array.isArray(r4.body?.content) ? r4.body.content.map((b) => b.text).join('') : '';
+  record('anthropic-messages', r4.status === 200 && /MSG_OK/i.test(c4 || ''), {
+    note: `status=${r4.status} content="${compact(c4, 80)}"`,
+  });
+
+  // Stage 5: paid-model behavior. Free account → clean 402/401, not an opaque
+  // 5xx. Paid account → 200 with content (the #15 verification).
+  const r5 = await postJson('/v1/chat/completions', {
+    model: paidModel, stream: false,
+    messages: [{ role: 'user', content: 'reply with exactly: PAID_OK' }],
+  });
+  if (isPaid) {
+    const c5 = r5.body?.choices?.[0]?.message?.content;
+    record('paid-model', r5.status === 200 && /PAID_OK/i.test(c5 || ''), {
+      note: `[PAID ACCOUNT] ${paidModel} status=${r5.status} content="${compact(c5, 80)}"`,
+      usage: r5.body?.usage,
+    });
+  } else {
+    const cleanReject = r5.status === 402 || r5.status === 401 || r5.status === 403;
+    record('paid-model', cleanReject, {
+      note: `[FREE ACCOUNT] ${paidModel} → status=${r5.status} (expected clean 402/401, got error="${compact(r5.body?.error?.message || r5.text, 100)}")`,
+    });
+  }
+}
+
+// ─── Summary ────────────────────────────────────────────────────────────────
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${'─'.repeat(60)}`);
+console.log(JSON.stringify({ ok: failed.length === 0, isPaid, stages: results }, null, 2));
+process.exit(failed.length === 0 ? 0 : 1);
