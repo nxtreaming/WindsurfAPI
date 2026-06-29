@@ -1484,6 +1484,42 @@ export function buildUsageBody(serverUsage, messages, completionText, thinkingTe
   };
 }
 
+// ── DEVIN_CONNECT account lifecycle ──────────────────────────────────
+// The connect path is token-based: it needs a Windsurf session key, which the
+// account pool already manages (rotation, RPM budget, rate-limit cooldowns).
+// We acquire from the pool so connect requests rotate and count toward quota
+// just like Cascade requests. If the pool is empty (operator only set
+// WINDSURF_API_KEY/DEVIN_CONNECT_TOKEN in env), acct is null and the connect
+// client falls back to the env token — so a single-token deploy still works.
+//
+// Account selection passes modelKey=null: connect selectors (swe-1-6-slow,
+// claude-*-medium) are a different namespace from the Cascade catalog, so the
+// per-account model-allow filter must not exclude otherwise-usable accounts.
+async function acquireConnectAccount(signal, callerKey) {
+  const tried = [];
+  const acct = await waitForAccount(tried, signal, QUEUE_MAX_WAIT_MS, null, callerKey);
+  return acct; // may be null → env-token fallback
+}
+
+// Pair with acquireConnectAccount on every exit path. Records billing/stats and
+// returns the account to the pool. `err` null ⇒ success.
+export function finalizeConnectAccount(acct, { model, startTime, err }) {
+  if (!acct) {
+    // env-token path: still record the request for dashboard totals.
+    recordRequest(model, !err, Date.now() - startTime, null);
+    return;
+  }
+  if (err) {
+    if (err.code === 'UNAUTHORIZED') reportError(acct.apiKey);
+    else if (err.code === 'RATE_LIMITED') markRateLimited(acct.apiKey, 5 * 60 * 1000, null);
+    else reportError(acct.apiKey);
+  } else {
+    reportSuccess(acct.apiKey);
+  }
+  recordRequest(model, !err, Date.now() - startTime, acct.apiKey);
+  releaseAccount(acct.apiKey);
+}
+
 // Wait until getApiKey returns a non-null account, or until maxWaitMs expires.
 // Used when every account has momentarily exhausted its RPM budget so the
 // client is queued instead of getting a 503.
@@ -1765,7 +1801,12 @@ async function _handleChatCompletionsInner(body, context = {}) {
     log.info(`Chat[${reqId}]: DEVIN_CONNECT ${reqModelName} -> selector=${selector}${mapped ? '' : ' [unmapped→free-tier]'} stream=${!!stream}`);
     const ccId = genId();
     const ccCreated = Math.floor(Date.now() / 1000);
+    const ccStart = Date.now();
+    // Acquire a pooled account for rotation + quota accounting. null ⇒ the
+    // connect client falls back to the env token (single-token deploys).
+    const ccAcct = await acquireConnectAccount(context.signal, callerKey);
     const connectParams = { messages, model: selector };
+    if (ccAcct) connectParams.token = ccAcct.apiKey;
     if (stream) {
       return {
         status: 200,
@@ -1780,20 +1821,26 @@ async function _handleChatCompletionsInner(body, context = {}) {
         },
         handler: async (res) => {
           const send = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
+          let streamErr = null;
           try {
             await streamChatCompletion(connectParams, send, { id: ccId, created: ccCreated, displayModel: reqModelName });
           } catch (err) {
+            streamErr = err;
             log.error(`Chat[${reqId}]: DEVIN_CONNECT stream error: ${err.message}`);
             send(chatStreamError(err.message, 'upstream_error', err.code || null));
           } finally {
+            finalizeConnectAccount(ccAcct, { model: reqModelName, startTime: ccStart, err: streamErr });
             if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
           }
         },
       };
     }
     try {
-      return await toChatCompletion(connectParams, { id: ccId, created: ccCreated, displayModel: reqModelName });
+      const out = await toChatCompletion(connectParams, { id: ccId, created: ccCreated, displayModel: reqModelName });
+      finalizeConnectAccount(ccAcct, { model: reqModelName, startTime: ccStart, err: null });
+      return out;
     } catch (err) {
+      finalizeConnectAccount(ccAcct, { model: reqModelName, startTime: ccStart, err });
       // Map the classified upstream code to the right HTTP status/type so a
       // free-tier /upgrade rejection reads as 402 model_blocked, an auth failure
       // as 401, and a rate limit as 429 — not a blanket 502.
