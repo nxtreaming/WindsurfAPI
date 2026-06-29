@@ -93,6 +93,64 @@ function messageText(content) {
   return JSON.stringify(content);
 }
 
+// Image (vision) support — GROUNDWORK, gated behind DEVIN_CONNECT_IMAGE_TAG.
+//
+// The `images` field lives NESTED inside each ChatMessage (unlike the Cascade
+// path, which carries images at the request level as field #6). The ImageData
+// sub-message shape is known and proven on the Cascade path
+// ({ base64_data=1, mime_type=2 }), but the protobuf TAG NUMBER of the `images`
+// field inside ChatMessage is NOT calibrated — the live capture was text-only
+// and the prost binary embeds no descriptor (see memory:
+// devin-connect-tools-vision-2026-06-30). So image emission is OFF unless the
+// operator sets DEVIN_CONNECT_IMAGE_TAG=<n> after calibrating it against a
+// vision-capable (paid) model — see scripts/devin-connect-image-calibrate.mjs.
+// Free-tier swe-1.6 is not a vision model, so this can't be end-to-end verified
+// here; the encoder is wired and unit-tested so it's ready the moment the tag
+// is known.
+export function getImageFieldTag(env = process.env) {
+  const raw = String(env.DEVIN_CONNECT_IMAGE_TAG || '').trim();
+  if (!raw) return 0; // unset → images disabled (current production behavior)
+  const tag = Number.parseInt(raw, 10);
+  return Number.isInteger(tag) && tag > 0 && tag < 536870912 ? tag : 0;
+}
+
+/**
+ * Pull data-URL / base64 image blocks out of OpenAI-style message content,
+ * yielding the same { base64_data, mime_type } shape the Cascade ImageData
+ * encoder consumes. Synchronous: only inline data-URL / base64 sources are
+ * handled here (remote https image URLs would need an async fetch and are out
+ * of scope for the wire builder — extract those upstream if needed).
+ */
+export function extractInlineImages(content) {
+  if (!Array.isArray(content)) return [];
+  const images = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    if (block.type === 'image') {
+      const src = block.source || {};
+      const mime = String(src.media_type || '').toLowerCase();
+      // PDFs are text-extracted upstream, not sent as images.
+      if (mime === 'application/pdf') continue;
+      if ((src.type === 'base64' || !src.type) && src.data) {
+        images.push({ base64_data: src.data, mime_type: src.media_type || 'image/png' });
+      }
+    } else if (block.type === 'image_url') {
+      const url = block.image_url?.url || '';
+      const m = url.replace(/\s/g, '').match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
+      if (m) images.push({ base64_data: m[2], mime_type: m[1].toLowerCase() });
+    }
+  }
+  return images;
+}
+
+/** Encode one ImageData sub-message: { base64_data=1, mime_type=2 } (Cascade-proven). */
+function encodeImageData(img) {
+  return Buffer.concat([
+    writeStringField(1, img.base64_data),
+    writeStringField(2, img.mime_type || 'image/png'),
+  ]);
+}
+
 /**
  * Build the ClientMetadata sub-message (field #1). The token is embedded SINGLE
  * here (the doubling is only for the HTTP Authorization header).
@@ -139,6 +197,7 @@ export function buildGetChatMessageRequest({ token, messages, model, sessionId, 
 
   // System turns are concatenated into the dedicated system_prompt field (#2);
   // everything else becomes a repeated ChatMessage (#3).
+  const imageTag = getImageFieldTag();
   let systemPrompt = '';
   const chatMessages = [];
   for (const msg of messages || []) {
@@ -154,11 +213,20 @@ export function buildGetChatMessageRequest({ token, messages, model, sessionId, 
     if (msg.role === 'tool') {
       text = `[tool result${msg.tool_call_id ? ` for ${msg.tool_call_id}` : ''}]: ${text}`;
     }
-    chatMessages.push(Buffer.concat([
+    const fields = [
       writeStringField(1, randomUUID()),
       writeVarintField(2, source),
       writeStringField(3, text),
-    ]));
+    ];
+    // Vision (gated): append repeated ImageData under the calibrated tag. When
+    // DEVIN_CONNECT_IMAGE_TAG is unset, imageTag is 0 and nothing is emitted —
+    // identical to the prior text-only behavior.
+    if (imageTag) {
+      for (const img of extractInlineImages(msg.content)) {
+        fields.push(writeMessageField(imageTag, encodeImageData(img)));
+      }
+    }
+    chatMessages.push(Buffer.concat(fields));
   }
 
   const modelConfig = Buffer.concat([
@@ -483,5 +551,5 @@ export async function chatWithRetry(params = {}) {
 
 export const __testing = {
   buildClientMetadata, buildCompletionConfig, generateFingerprint,
-  messageText, f64le, SOURCE,
+  messageText, f64le, SOURCE, encodeImageData,
 };

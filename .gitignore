@@ -15,6 +15,7 @@ scripts/*
 !scripts/run-test-shard.mjs
 !scripts/cascade-survival-probe.mjs
 !scripts/devin-connect-smoke.mjs
+!scripts/devin-connect-image-calibrate.mjs
 src/get-token.js
 src/test-cascade.js
 src/runtime-config.json

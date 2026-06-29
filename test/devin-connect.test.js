@@ -8,6 +8,8 @@ import {
   classifyUpstreamError,
   isRetryable,
   streamChat,
+  getImageFieldTag,
+  extractInlineImages,
   __testing,
 } from '../src/devin-connect.js';
 import {
@@ -15,7 +17,7 @@ import {
   parseFields, getField, getAllFields,
 } from '../src/proto.js';
 
-const ENV_KEYS = ['DEVIN_CONNECT_TOKEN', 'WINDSURF_API_KEY'];
+const ENV_KEYS = ['DEVIN_CONNECT_TOKEN', 'WINDSURF_API_KEY', 'DEVIN_CONNECT_IMAGE_TAG'];
 const originalEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
 
 afterEach(() => {
@@ -320,5 +322,112 @@ describe('isRetryable', () => {
     assert.equal(isRetryable({ code: 'MODEL_BLOCKED' }), false);
     assert.equal(isRetryable({ code: 'UNAUTHORIZED' }), false);
     assert.equal(isRetryable(null), false);
+  });
+});
+
+const RED_DOT = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+describe('getImageFieldTag (vision gate)', () => {
+  it('returns 0 (disabled) when unset', () => {
+    assert.equal(getImageFieldTag({}), 0);
+  });
+  it('parses a positive integer tag', () => {
+    assert.equal(getImageFieldTag({ DEVIN_CONNECT_IMAGE_TAG: '6' }), 6);
+  });
+  it('rejects non-numeric / non-positive / out-of-range values (→ 0)', () => {
+    assert.equal(getImageFieldTag({ DEVIN_CONNECT_IMAGE_TAG: 'abc' }), 0);
+    assert.equal(getImageFieldTag({ DEVIN_CONNECT_IMAGE_TAG: '0' }), 0);
+    assert.equal(getImageFieldTag({ DEVIN_CONNECT_IMAGE_TAG: '-3' }), 0);
+    assert.equal(getImageFieldTag({ DEVIN_CONNECT_IMAGE_TAG: '999999999' }), 0);
+  });
+});
+
+describe('extractInlineImages', () => {
+  it('returns [] for string / non-array content', () => {
+    assert.deepEqual(extractInlineImages('hi'), []);
+    assert.deepEqual(extractInlineImages(null), []);
+  });
+  it('extracts an Anthropic-style base64 image block', () => {
+    const imgs = extractInlineImages([
+      { type: 'text', text: 'see this' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: RED_DOT } },
+    ]);
+    assert.deepEqual(imgs, [{ base64_data: RED_DOT, mime_type: 'image/png' }]);
+  });
+  it('extracts an OpenAI image_url data URL', () => {
+    const imgs = extractInlineImages([
+      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${RED_DOT}` } },
+    ]);
+    assert.deepEqual(imgs, [{ base64_data: RED_DOT, mime_type: 'image/jpeg' }]);
+  });
+  it('skips PDF image blocks (text-extracted upstream, not sent as image)', () => {
+    const imgs = extractInlineImages([
+      { type: 'image', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBER' } },
+    ]);
+    assert.deepEqual(imgs, []);
+  });
+  it('ignores remote https image_url (needs async fetch, out of scope for the builder)', () => {
+    const imgs = extractInlineImages([
+      { type: 'image_url', image_url: { url: 'https://example.com/cat.png' } },
+    ]);
+    assert.deepEqual(imgs, []);
+  });
+});
+
+describe('encodeImageData', () => {
+  it('encodes { base64_data=#1, mime_type=#2 } (Cascade-proven ImageData shape)', () => {
+    const buf = __testing.encodeImageData({ base64_data: 'AAAA', mime_type: 'image/png' });
+    const f = parseFields(buf);
+    assert.equal(getField(f, 1, 2).value.toString('utf8'), 'AAAA');
+    assert.equal(getField(f, 2, 2).value.toString('utf8'), 'image/png');
+  });
+  it('defaults mime_type to image/png', () => {
+    const buf = __testing.encodeImageData({ base64_data: 'AAAA' });
+    assert.equal(getField(parseFields(buf), 2, 2).value.toString('utf8'), 'image/png');
+  });
+});
+
+describe('buildGetChatMessageRequest — vision (gated)', () => {
+  const visionMsg = {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'what color?' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${RED_DOT}` } },
+    ],
+  };
+
+  it('does NOT emit any image sub-field when DEVIN_CONNECT_IMAGE_TAG is unset', () => {
+    delete process.env.DEVIN_CONNECT_IMAGE_TAG;
+    const proto = buildGetChatMessageRequest({ token: TOKEN, model: 'm', messages: [visionMsg] });
+    const cm = parseFields(getField(parseFields(proto), 3, 2).value);
+    // Only #1 msg_id, #2 source, #3 text — no extra message field for images.
+    assert.equal(getField(cm, 3, 2).value.toString('utf8'), 'what color?');
+    // No field with a wire-type-2 image payload beyond #3.
+    const msgFields = cm.filter(f => f.wireType === 2 && f.field > 3);
+    assert.equal(msgFields.length, 0, 'no image sub-message emitted when gate is off');
+  });
+
+  it('emits ImageData under the configured tag when DEVIN_CONNECT_IMAGE_TAG is set', () => {
+    process.env.DEVIN_CONNECT_IMAGE_TAG = '6';
+    const proto = buildGetChatMessageRequest({ token: TOKEN, model: 'm', messages: [visionMsg] });
+    const cm = parseFields(getField(parseFields(proto), 3, 2).value);
+    assert.equal(getField(cm, 3, 2).value.toString('utf8'), 'what color?');
+    const imgField = getField(cm, 6, 2);
+    assert.ok(imgField, 'ImageData emitted under tag #6');
+    const img = parseFields(imgField.value);
+    assert.equal(getField(img, 1, 2).value.toString('utf8'), RED_DOT);
+    assert.equal(getField(img, 2, 2).value.toString('utf8'), 'image/png');
+    delete process.env.DEVIN_CONNECT_IMAGE_TAG;
+  });
+
+  it('text-only turns are unaffected by the gate being on', () => {
+    process.env.DEVIN_CONNECT_IMAGE_TAG = '6';
+    const proto = buildGetChatMessageRequest({
+      token: TOKEN, model: 'm', messages: [{ role: 'user', content: 'plain text' }],
+    });
+    const cm = parseFields(getField(parseFields(proto), 3, 2).value);
+    assert.equal(getField(cm, 3, 2).value.toString('utf8'), 'plain text');
+    assert.equal(getField(cm, 6, 2), null, 'no image field on a text-only turn');
+    delete process.env.DEVIN_CONNECT_IMAGE_TAG;
   });
 });
