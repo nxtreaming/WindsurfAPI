@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { isModelAllowedForAccount, getAvailableModelsForAccount } from '../src/auth.js';
 
 // Free Windsurf accounts entitled by `cascade_allowed_models_config` to
@@ -82,6 +83,25 @@ describe('isModelAllowedForAccount — capabilities-first routing', () => {
     };
     assert.equal(isModelAllowedForAccount(account, 'claude-opus-4.6'), true);
     assert.equal(isModelAllowedForAccount(account, 'glm-4.7'), true);
+  });
+
+  it('every automatic tier writer is gated by tierManual (no clobber of #8 override)', () => {
+    // isModelAllowedForAccount trusts account.tier under tierManual, so a
+    // background writer that overwrites account.tier would silently defeat the
+    // operator escape hatch. Pin that all automatic `account.tier = ...` writes
+    // (refreshCredits planName inference, fetchUserStatus, probe restore,
+    // updateCapability/inferTier) consult tierManual first.
+    const AUTH = readFileSync(new URL('../src/auth.js', import.meta.url), 'utf8');
+    // The only unconditional `account.tier =` writes allowed are the manual
+    // setter (setAccountTier) itself. Count guarded vs total automatic writes.
+    assert.match(AUTH, /if \(!account\.tierManual\) account\.tier = status\.tierName/,
+      'fetchUserStatus must skip the tier write under tierManual');
+    assert.match(AUTH, /if \(status && !account\.tierManual\) account\.tier = status\.tierName/,
+      'probe tier restore must skip under tierManual');
+    assert.match(AUTH, /if \(!account\.tierManual\) \{[\s\S]*?account\.tier = 'pro'/,
+      'refreshCredits planName inference must be wrapped in a tierManual guard');
+    assert.match(AUTH, /if \(!account\.tierManual && !account\.userStatusLastFetched\) \{\s*\n\s*account\.tier = inferTier/,
+      'inferTier write must stay gated by tierManual');
   });
 });
 

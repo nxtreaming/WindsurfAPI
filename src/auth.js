@@ -1099,14 +1099,24 @@ function isRateLimitedForModel(account, modelKey, now) {
 
 /**
  * Report an error for an API key (increment error count, auto-disable).
+ *
+ * The error streak is time-windowed (mirroring reportBanSignal): three auth
+ * failures spread across hours — e.g. transient "unauthenticated" blips during
+ * a Windsurf deploy — must NOT permanently disable a healthy key. Only three
+ * failures inside `windowMs` (with no success resetting them) disable it.
  */
-export function reportError(apiKey) {
+export function reportError(apiKey, { windowMs = 30 * 60 * 1000 } = {}) {
   const account = accounts.find(a => a.apiKey === apiKey);
   if (!account) return;
-  account.errorCount++;
+  const now = Date.now();
+  const last = account._errorAt || 0;
+  // A stale streak (older than the window) starts over rather than carrying
+  // a months-old failure count into a fresh blip.
+  account.errorCount = (now - last < windowMs) ? (account.errorCount || 0) + 1 : 1;
+  account._errorAt = now;
   if (account.errorCount >= 3) {
     account.status = 'error';
-    log.warn(`Account ${safeAccountRef(account)} disabled after ${account.errorCount} errors`);
+    log.warn(`Account ${safeAccountRef(account)} disabled after ${account.errorCount} errors in ${Math.round(windowMs / 60000)}m`);
   }
 }
 
@@ -1444,10 +1454,15 @@ export async function refreshCredits(id) {
     // motto1's 14-day Pro trial was misclassified as free because planName
     // wasn't "Pro").
     const pn = status.planName || '';
-    if (/pro|teams|enterprise|trial|individual|premium|paid/i.test(pn)) {
-      if (account.tier !== 'pro') account.tier = 'pro';
-    } else if (/free/i.test(pn)) {
-      if (account.tier === 'unknown') account.tier = 'free';
+    if (!account.tierManual) {
+      // Don't clobber an operator-set tier (tierManual). isModelAllowedForAccount
+      // trusts account.tier when tierManual is set, so overwriting it here would
+      // silently defeat the manual escape hatch (#8).
+      if (/pro|teams|enterprise|trial|individual|premium|paid/i.test(pn)) {
+        if (account.tier !== 'pro') account.tier = 'pro';
+      } else if (/free/i.test(pn)) {
+        if (account.tier === 'unknown') account.tier = 'free';
+      }
     }
     saveAccounts();
     // Surface the raw response once so the caller can decide whether to mine
@@ -1559,7 +1574,11 @@ export async function fetchUserStatus(id, { allowLsStart = true } = {}) {
 
   // Apply to account — authoritative tier + entitlement snapshot.
   const prevTier = account.tier;
-  account.tier = status.tierName;
+  // tierManual is the operator escape hatch (#8): don't let GetUserStatus
+  // overwrite a manually-set tier. The entitlement snapshot below still
+  // updates regardless (isModelAllowedForAccount ignores capabilities under
+  // tierManual anyway).
+  if (!account.tierManual) account.tier = status.tierName;
   account.userStatus = {
     teamsTier: status.teamsTier,
     pro: status.pro,
@@ -1814,7 +1833,8 @@ async function _probeAccountImpl(account, { allowLsStart = true, canary } = {}) 
 
   // If GetUserStatus succeeded, its tier decision wins over the inferred one
   // (updateCapability rewrites tier via inferTier, so restore it afterwards).
-  if (status) account.tier = status.tierName;
+  // Unless the operator pinned the tier manually (#8) — then leave it alone.
+  if (status && !account.tierManual) account.tier = status.tierName;
 
   account.lastProbed = Date.now();
   saveAccounts();

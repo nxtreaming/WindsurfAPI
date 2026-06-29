@@ -8,6 +8,8 @@ import {
   getAccountList,
   getAccountListStats,
   removeAccount,
+  reportError,
+  reportSuccess,
   shouldEmitNoAuthWarning,
   validateApiKey,
 } from '../src/auth.js';
@@ -90,5 +92,44 @@ describe('shouldEmitNoAuthWarning', () => {
     assert.ok(stats.flagged >= 2);
     assert.ok(stats.rateLimited >= 1);
     assert.ok(stats.disabled >= 1);
+  });
+});
+
+describe('reportError — time-windowed auth-failure streak', () => {
+  it('does not disable a key when 3 failures are spread beyond the window', () => {
+    const key = `err-spread-${Date.now()}-${Math.random()}`;
+    const account = addAccountByKey(key, 'err-spread');
+    createdAccountIds.push(account.id);
+
+    // Three failures, each older than the window relative to the next: the
+    // streak resets every time, so the account stays active (transient blips
+    // during separate Windsurf deploys must not kill a healthy key).
+    reportError(key, { windowMs: 1 });
+    const internal = getAccountInternal(account.id);
+    internal._errorAt = Date.now() - 10; // age the last failure past windowMs
+    reportError(key, { windowMs: 1 });
+    internal._errorAt = Date.now() - 10;
+    reportError(key, { windowMs: 1 });
+
+    assert.equal(internal.errorCount, 1);
+    assert.notEqual(internal.status, 'error');
+  });
+
+  it('disables a key after 3 failures inside the window, and success rehabilitates', () => {
+    const key = `err-burst-${Date.now()}-${Math.random()}`;
+    const account = addAccountByKey(key, 'err-burst');
+    createdAccountIds.push(account.id);
+
+    reportError(key);
+    reportError(key);
+    reportError(key);
+    const internal = getAccountInternal(account.id);
+    assert.equal(internal.errorCount, 3);
+    assert.equal(internal.status, 'error');
+
+    // A later success clears the streak and reactivates the account.
+    reportSuccess(key);
+    assert.equal(internal.errorCount, 0);
+    assert.equal(internal.status, 'active');
   });
 });
