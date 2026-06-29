@@ -47,6 +47,11 @@ export const MODELS = {
   // `max` reasoning tier appeared in GetCascadeModelConfigs after the 4.7 launch — sits
   // above xhigh in the effort ladder. No -thinking sibling in cloud catalog yet.
   'claude-opus-4-7-max':            { name: 'claude-opus-4-7-max',            provider: 'anthropic', enumValue: 0,   modelUid: 'claude-opus-4-7-max', credit: 16 },
+  // Claude Opus 4.8 — confirmed live in GetCascadeModelConfigs (2026-06-29 account dump).
+  // Only the `medium` tier is exposed upstream so far (no low/high/xhigh siblings yet);
+  // credit 25, 1M-token context, 128k max output, supports images + parallel tools + thinking.
+  // The -thinking sibling is auto-inherited at access-check time (#103), so no separate entry.
+  'claude-opus-4-8-medium':         { name: 'claude-opus-4-8-medium',         provider: 'anthropic', enumValue: 0,   modelUid: 'claude-opus-4-8-medium', credit: 25 },
 
   // ── GPT ─────────────────────────────────────────────────
   'gpt-4o':                         { name: 'gpt-4o',                         provider: 'openai', enumValue: 109, modelUid: 'MODEL_CHAT_GPT_4O_2024_08_06', credit: 1 },
@@ -383,6 +388,16 @@ const ANTHROPIC_DATED = {
   'claude-opus-4.7-high-thinking':   'claude-opus-4-7-high-thinking',
   'claude-opus-4.7-xhigh-thinking':  'claude-opus-4-7-xhigh-thinking',
   'claude-opus-4.7-max':             'claude-opus-4-7-max',
+
+  // Anthropic Opus 4.8 — confirmed live 2026-06-29. Only `medium` is exposed
+  // upstream so far, so every convenience form collapses to the one real tier.
+  // The -thinking sibling is auto-inherited at access-check time (#103).
+  'claude-opus-4-8':            'claude-opus-4-8-medium',
+  'claude-opus-4-8-latest':     'claude-opus-4-8-medium',
+  'claude-opus-4.8':            'claude-opus-4-8-medium',
+  'claude-opus-4.8-medium':     'claude-opus-4-8-medium',
+  'claude-opus-4-8-thinking':   'claude-opus-4-8-medium',
+  'claude-opus-4.8-thinking':   'claude-opus-4-8-medium',
 };
 for (const [k, v] of Object.entries(ANTHROPIC_DATED)) _lookup.set(k, v);
 
@@ -414,6 +429,10 @@ const CURSOR_ALIASES = {
   'opus-4-7':              'claude-opus-4-7-medium',
   'opus-4.7':              'claude-opus-4-7-medium',
   'o4.7':                  'claude-opus-4-7-medium',
+  'opus-4-8':              'claude-opus-4-8-medium',
+  'opus-4.8':              'claude-opus-4-8-medium',
+  'opus-4.8-thinking':     'claude-opus-4-8-medium',
+  'o4.8':                  'claude-opus-4-8-medium',
   // sonnet
   'sonnet-4.6':            'claude-sonnet-4.6',
   'sonnet-4.6-thinking':   'claude-sonnet-4.6-thinking',

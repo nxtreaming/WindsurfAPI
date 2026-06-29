@@ -20,6 +20,21 @@ describe('v2.0.29 model catalog correctness', () => {
     assert.equal(resolveModel('claude-opus-4.7-high-thinking'), 'claude-opus-4-7-high-thinking');
   });
 
+  it('exposes opus-4.8 (medium-only) from real upstream evidence with all alias forms', () => {
+    // GetCascadeModelConfigs dump 2026-06-29: only the medium tier is live.
+    assert.equal(getModelInfo('claude-opus-4-8-medium')?.provider, 'anthropic');
+    assert.equal(getModelInfo('claude-opus-4-8-medium')?.modelUid, 'claude-opus-4-8-medium');
+    assert.equal(getModelInfo('claude-opus-4-8-medium')?.credit, 25);
+    // every convenience form collapses to the one real tier
+    for (const alias of ['claude-opus-4-8', 'claude-opus-4.8', 'opus-4.8', 'opus-4-8', 'o4.8',
+                         'claude-opus-4.8-medium', 'claude-opus-4-8-latest']) {
+      assert.equal(resolveModel(alias), 'claude-opus-4-8-medium', `alias ${alias}`);
+    }
+    // -thinking collapses to medium too (no separate cloud tier yet)
+    assert.equal(resolveModel('claude-opus-4.8-thinking'), 'claude-opus-4-8-medium');
+    assert.equal(resolveModel('claude-opus-4-8-thinking'), 'claude-opus-4-8-medium');
+  });
+
   it('keeps new v2.0.29 model metadata aligned with declared keys', () => {
     assert.equal(getModelInfo('kimi-k2-thinking')?.modelUid, 'MODEL_KIMI_K2_THINKING');
     assert.equal(getModelInfo('kimi-k2-thinking')?.enumValue, 394);
