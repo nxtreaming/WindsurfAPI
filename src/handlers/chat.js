@@ -39,6 +39,7 @@ import {
 import { selectBackend, usesCascadeFlow } from '../backend-router.js';
 import { toChatCompletion as _toChatCompletion, streamChatCompletion as _streamChatCompletion } from '../devin-connect-openai.js';
 import { resolveConnectSelector } from '../devin-connect-models.js';
+import { isRetryable as isConnectRetryable } from '../devin-connect.js';
 import { sanitizeText, sanitizeToolCall, PathSanitizeStream } from '../sanitize.js';
 import { registerSseController } from '../sse-registry.js';
 import {
@@ -1951,6 +1952,25 @@ async function _handleChatCompletionsInner(body, context = {}) {
               finalizeConnectAccount(a, { model: reqModelName, startTime: ccStart, err: null });
               return { kind: 'ok' };
             } catch (err) {
+              // Transient blip (5xx / ECONNRESET / server "unavailable") BEFORE
+              // any byte hit the wire: the non-stream path already retries these
+              // (devin-connect-openai.js maxRetries), but the stream path didn't,
+              // so a one-off upstream hiccup surfaced as a hard error to the
+              // client. Replay once on the SAME token while !emitted — replaying
+              // after bytes are out would duplicate content, so it's gated.
+              if (isConnectRetryable(err) && a && !emitted) {
+                log.info(`Chat[${reqId}]: DEVIN_CONNECT stream transient error (${err.code || err.status}); replaying once on same token`);
+                try {
+                  await streamChatCompletion(params, send, connectMeta);
+                  finalizeConnectAccount(a, { model: reqModelName, startTime: ccStart, err: null });
+                  return { kind: 'ok' };
+                } catch (retryErr) {
+                  // Retry failed too — fall through to the normal handling below
+                  // (which may still recover an UNAUTHORIZED via re-login, or
+                  // surface the error). Reassign so the branches below see it.
+                  err = retryErr;
+                }
+              }
               if (err.code === 'UNAUTHORIZED' && a && !emitted) {
                 // No force: honor the 60s re-login cooldown. Concurrent callers
                 // still coalesce on the inflight promise (auth.js), so a dead

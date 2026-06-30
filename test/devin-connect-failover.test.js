@@ -29,6 +29,10 @@ function unauthorized() {
   return Object.assign(new Error('invalid token'), { code: 'UNAUTHORIZED' });
 }
 
+function transient() {
+  return Object.assign(new Error('upstream hiccup'), { status: 503 });
+}
+
 function fakeRes() {
   const listeners = new Map();
   return {
@@ -241,6 +245,55 @@ describe('DEVIN_CONNECT cross-account failover — stream', () => {
     assert.equal(seen.length, 1, 'no failover after a byte is on the wire');
     assert.ok(frames.some(f => f !== '[DONE]' && f.choices?.[0]?.delta?.content === 'partial'), 'emitted the partial chunk');
     assert.ok(frames.some(f => f !== '[DONE]' && f.error), 'surfaced an error frame');
+  });
+
+  it('replays once on the SAME token after a pre-emit transient 5xx, then streams (P1 #34)', async () => {
+    const a = seed('s-transient-1');
+    let calls = 0;
+    const seen = [];
+    __setConnectDeps({
+      streamChatCompletion: async (params, send) => {
+        calls++;
+        seen.push(params.token);
+        if (calls === 1) throw transient(); // 503 before any byte
+        send({ id: 's', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'RECOVERED' }, finish_reason: null }] });
+        send({ id: 's', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+      },
+    });
+
+    const result = await handleChatCompletions(
+      { model: 'swe-1-6-slow', stream: true, messages: [{ role: 'user', content: 'hi' }] },
+      { callerKey: '' },
+    );
+    const res = fakeRes();
+    await result.handler(res);
+    const frames = parseFrames(res.body);
+    assert.equal(calls, 2, 'retried once on the transient blip');
+    assert.equal(seen[0], seen[1], 'replay used the SAME token (no failover hop)');
+    assert.ok(frames.some(f => f !== '[DONE]' && f.choices?.[0]?.delta?.content === 'RECOVERED'), 'streamed after replay');
+    assert.ok(!frames.some(f => f !== '[DONE]' && f.error), 'no error frame after a successful replay');
+  });
+
+  it('does NOT replay a transient error once a byte is already emitted', async () => {
+    seed('s-transient-mid-1');
+    let calls = 0;
+    __setConnectDeps({
+      streamChatCompletion: async (params, send) => {
+        calls++;
+        send({ id: 's', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'partial' }, finish_reason: null }] });
+        throw transient(); // 503 AFTER a byte → replay would duplicate, so it must not
+      },
+    });
+
+    const result = await handleChatCompletions(
+      { model: 'swe-1-6-slow', stream: true, messages: [{ role: 'user', content: 'hi' }] },
+      { callerKey: '' },
+    );
+    const res = fakeRes();
+    await result.handler(res);
+    const frames = parseFrames(res.body);
+    assert.equal(calls, 1, 'no replay after a byte is on the wire');
+    assert.ok(frames.some(f => f !== '[DONE]' && f.error), 'surfaced an error frame instead');
   });
 });
 
