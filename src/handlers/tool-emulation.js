@@ -113,7 +113,26 @@ export function buildToolPreamble(tools, toolChoice = 'auto', modelKey = null, p
   const antiRefusal = dialect === 'gpt_native'
     ? `The functions ARE available; if you need to read a file or run a command, call the function — never reply "please paste the file" or "I do not have access".`
     : '';
-  return `Tools available this turn: ${names.join(', ')}. To call one, emit a single-line block: ${emit}.${antiRefusal ? ' ' + antiRefusal : ''} ${hints.join(' ')} ${WORKSPACE_PATH_HINT} Otherwise answer directly in plain text. After the last call, stop generating; the caller returns results in the next turn as <tool_result tool_call_id="...">...</tool_result>.`;
+  // tool_choice constraint (#G2). The fallback historically hard-coded
+  // "auto" and silently dropped the caller's tool_choice on the
+  // DEVIN_CONNECT path (no proto tool_calling_section slot exists there, so
+  // prompt text is the only channel). Emit a single matter-of-fact clause
+  // that respects the injection-shape constraints above: no `### …`
+  // headers, no ```json fences, no jailbreak vocab, stays compact. Whether
+  // the upstream model actually obeys a forced/required constraint under
+  // text emulation can only be confirmed with a live/paid token —
+  // TODO(unverified). `auto` keeps the prior wording exactly (no clause)
+  // so existing behaviour and tests do not regress.
+  const { mode, forceName } = resolveToolChoice(toolChoice);
+  let choiceClause = '';
+  if (forceName) {
+    choiceClause = ` You MUST call the function "${forceName}" this turn — no other function and no plain-text answer.`;
+  } else if (mode === 'required') {
+    choiceClause = ` You MUST call at least one of these functions this turn — do not answer in plain text.`;
+  } else if (mode === 'none') {
+    choiceClause = ` Do NOT call any function this turn — answer the user directly in plain text.`;
+  }
+  return `Tools available this turn: ${names.join(', ')}. To call one, emit a single-line block: ${emit}.${antiRefusal ? ' ' + antiRefusal : ''}${choiceClause} ${hints.join(' ')} ${WORKSPACE_PATH_HINT} Otherwise answer directly in plain text. After the last call, stop generating; the caller returns results in the next turn as <tool_result tool_call_id="...">...</tool_result>.`;
 }
 
 /**
@@ -358,8 +377,11 @@ function resolveToolChoice(tc) {
   if (!tc || tc === 'auto') return { mode: 'auto', forceName: null };
   if (tc === 'required' || tc === 'any') return { mode: 'required', forceName: null };
   if (tc === 'none') return { mode: 'none', forceName: null };
-  if (typeof tc === 'object' && tc.function?.name) {
-    return { mode: 'required', forceName: tc.function.name };
+  if (typeof tc === 'object' && (tc.function?.name || tc.name)) {
+    // Accept both the OpenAI/Anthropic-normalized shape `{function:{name}}`
+    // and the bare `{name}` shape. effectiveToolsForToolChoice (chat.js)
+    // already filters on both, so resolve the forced name the same way here.
+    return { mode: 'required', forceName: tc.function?.name || tc.name };
   }
   return { mode: 'auto', forceName: null };
 }
@@ -691,6 +713,11 @@ export function normalizeMessagesForCascade(messages, tools, options = {}) {
   const modelKey = options.modelKey || null;
   const provider = options.provider || null;
   const route = options.route || null;
+  // tool_choice (#G2): default 'auto' preserves the prior hard-coded
+  // behaviour. The DEVIN_CONNECT path (chat.js) now threads the caller's
+  // tool_choice through so required/forced constraints reach the prompt;
+  // the Cascade path can keep passing nothing and stays on 'auto'.
+  const toolChoice = options.toolChoice ?? 'auto';
   const dialect = pickToolDialect(modelKey, provider, route);
   const out = [];
 
@@ -745,7 +772,7 @@ export function normalizeMessagesForCascade(messages, tools, options = {}) {
   // confused prose with zero tool_calls and hit max_wait. Skipping the
   // preamble on tool_result turns lets Opus stay in tool-using mode for
   // the full conversation, matching native-Anthropic-API behaviour.
-  const preamble = buildToolPreamble(tools, 'auto', modelKey, provider, route);
+  const preamble = buildToolPreamble(tools, toolChoice, modelKey, provider, route);
   if (preamble && injectUserPreamble) {
     for (let i = out.length - 1; i >= 0; i--) {
       if (out[i].role !== 'user') continue;

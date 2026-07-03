@@ -232,6 +232,53 @@ try {
   });
 }
 
+// ─── Stage 0d: LIVE re-login round-trip (opt-in, zero-billable) ──────────────
+// The recovery-config stage above only REPORTS whether hands-off recovery is
+// armed. This stage actually FIRES it end-to-end against the real windsurfLogin:
+// plant a dead token, run reLoginAccount, confirm a fresh live session token
+// swaps in. Opt-in (SMOKE_RELOGIN_LIVE=1 + real email/password + a cred key) and
+// billing-free (login + GetUserStatus only). Uses a temp cred store + an
+// ephemeral pool account so the real accounts.json is never touched.
+if (process.env.SMOKE_RELOGIN_LIVE === '1') {
+  const email = process.env.SMOKE_RELOGIN_EMAIL || '';
+  const password = process.env.SMOKE_RELOGIN_PASSWORD || '';
+  if (!email || !password || !process.env.DEVIN_CONNECT_CRED_KEY) {
+    record('relogin-live', false, { note: 'armed but missing SMOKE_RELOGIN_EMAIL/PASSWORD or DEVIN_CONNECT_CRED_KEY' });
+  } else {
+    const tmp = mkdtempSync(join(tmpdir(), 'connect-smoke-relogin-'));
+    const prevFile = process.env.DEVIN_CONNECT_CRED_FILE;
+    const prevFlag = process.env.DEVIN_CONNECT_AUTO_RELOGIN;
+    process.env.DEVIN_CONNECT_CRED_FILE = join(tmp, 'creds.json');
+    process.env.DEVIN_CONNECT_AUTO_RELOGIN = '1';
+    let acct;
+    try {
+      const { addAccountByKey, removeAccount, reLoginAccount } = await import('../src/auth.js');
+      storeCredential(email, password);
+      acct = addAccountByKey('devin-session-token$DEAD-SMOKE', email);
+      acct.email = email; acct.method = 'email';
+      const fresh = await reLoginAccount(acct.id, { force: true });
+      const ok = typeof fresh === 'string' && fresh.startsWith('devin-session-token$') && fresh !== 'devin-session-token$DEAD-SMOKE';
+      let live = false;
+      if (ok) {
+        const st = await fetchUserStatus({ token: fresh }).catch(() => null);
+        live = !!st;
+      }
+      record('relogin-live', ok && live, {
+        note: ok && live ? 'dead token revived via real login + fresh token is live'
+          : `relogin=${ok} freshTokenLive=${live}`,
+      });
+      if (acct) removeAccount(acct.id);
+    } catch (err) {
+      record('relogin-live', false, { note: `threw: ${err.message}` });
+      if (acct) { try { (await import('../src/auth.js')).removeAccount(acct.id); } catch {} }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+      if (prevFile === undefined) delete process.env.DEVIN_CONNECT_CRED_FILE; else process.env.DEVIN_CONNECT_CRED_FILE = prevFile;
+      if (prevFlag === undefined) delete process.env.DEVIN_CONNECT_AUTO_RELOGIN; else process.env.DEVIN_CONNECT_AUTO_RELOGIN = prevFlag;
+    }
+  }
+}
+
 // ─── Billable chat stages ───────────────────────────────────────────────────
 if (!realCalls) {
   console.log('\n[skip] CONNECT_SMOKE_REAL_CALLS=0 — chat stages skipped (preflight only).');
@@ -295,9 +342,17 @@ if (!realCalls) {
       usage: r5.body?.usage,
     });
   } else {
-    const cleanReject = r5.status === 402 || r5.status === 401 || r5.status === 403;
-    record('paid-model', cleanReject, {
-      note: `[FREE ACCOUNT] ${paidModel} → status=${r5.status} (expected clean 402/401, got error="${compact(r5.body?.error?.message || r5.text, 100)}")`,
+    // A free account asking for a paid selector is an ENTITLEMENT wall, which
+    // must surface as 402 MODEL_BLOCKED — not 401 "dead session tokens". The
+    // latter was a live-fire bug (#42): upstream returns a bare permission_denied
+    // indistinguishable from a retired token, and the old code ran a re-login +
+    // full-pool failover storm before lying with "all accounts exhausted". A 401
+    // here now means that regression is back. 403 still tolerated (hard auth).
+    const code = r5.body?.error?.code;
+    const correct = r5.status === 402 && code === 'MODEL_BLOCKED';
+    const tolerated = r5.status === 403;
+    record('paid-model', correct || tolerated, {
+      note: `[FREE ACCOUNT] ${paidModel} → status=${r5.status} code=${code || '-'} (expected 402/MODEL_BLOCKED${r5.status === 401 ? ' — 401 = #42 dead-token-misclassification REGRESSED' : ''}) error="${compact(r5.body?.error?.message || r5.text, 100)}"`,
     });
   }
 

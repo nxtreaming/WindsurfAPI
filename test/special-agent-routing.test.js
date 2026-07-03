@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,9 +33,19 @@ const ENV_KEYS = [
   'WINDSURFAPI_SHOW_DISABLED_SPECIAL_AGENT_MODELS',
   'DEVIN_TIMEOUT_MS',
   'DEVIN_ACP_PING_MS',
+  'DEVIN_ACP_PROBE',
 ];
 const originalEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
 const originalModelAccess = getModelAccessConfig();
+
+beforeEach(() => {
+  // These routing tests inject a mock ACP runner and never set a real CLI
+  // binary, so the new proactive availability probe (default ON) would fork a
+  // real `devin --version` that fails on CI. Disable it here so they exercise
+  // the unchanged routing/runner path; the probe has dedicated coverage in
+  // devin-acp-probe.test.js.
+  process.env.DEVIN_ACP_PROBE = '0';
+});
 
 afterEach(() => {
   for (const k of ENV_KEYS) {

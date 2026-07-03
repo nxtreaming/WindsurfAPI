@@ -25,7 +25,7 @@ import {
 import { config, log } from './config.js';
 import { recordRequest } from './dashboard/stats.js';
 import { sanitizeText, PathSanitizeStream } from './sanitize.js';
-import { runDevinAcpProcess } from './devin-acp.js';
+import { runDevinAcpProcess, probeDevinCliAvailable } from './devin-acp.js';
 
 const SPECIAL_BACKEND = 'special_agent';
 const DEFAULT_SPECIAL_MODELS = new Set([
@@ -647,11 +647,26 @@ async function checkoutAccount(callerKey, modelKey = null) {
 function reportRunFailure(apiKey, err, deps = {}) {
   if (!apiKey) return;
   const status = Number(err?.status) || 0;
+  const type = String(err?.type || '');
   const message = String(err?.message || '');
   const banSignal = deps.reportBanSignal || reportBanSignal;
   const rateLimited = deps.markRateLimited || markRateLimited;
   const internalError = deps.reportInternalError || reportInternalError;
   const genericError = deps.reportError || reportError;
+  // AC1 gap-c: a 503 backend_unavailable means the Devin CLI binary is missing
+  // or not executable — an ENVIRONMENT fault, not an account fault. It must NOT
+  // feed the windowed generic-error streak, or a missing/removed CLI would
+  // wrongly disable every healthy account it touches (3 hits → status='error').
+  // The proactive probe normally catches this before checkout, but the passive
+  // post-spawn ENOENT→503 (probe disabled, print mode, or a TOCTOU race where
+  // the binary vanishes between probe and spawn) still lands here, so guard it.
+  if (status === 503 || type === 'backend_unavailable') {
+    return;
+  }
+  // A client abort (499 request_aborted) is also not an upstream/account fault.
+  if (status === 499 || type === 'request_aborted') {
+    return;
+  }
   // Account-level ban/suspension shapes — promote to banned after 2 hits.
   if (looksLikeBanSignal(message)) {
     banSignal(apiKey, message);
@@ -719,6 +734,28 @@ export async function handleSpecialAgentChatCompletion(body, route, deps = {}) {
   let acct = null;
   let handedOff = false;
   try {
+    const mode = String(process.env.DEVIN_CLI_MODE || 'print').trim().toLowerCase();
+    // AC1 gap-e: proactively confirm the Devin CLI is runnable BEFORE we reserve
+    // a pool account / spawn the ACP child. A missing or non-executable binary
+    // is an ENVIRONMENT fault, not an account fault, so failing fast here avoids
+    // burning a checkout + RPM slot only to hit ENOENT post-spawn. The probe is
+    // zero-billable (devin --version only) and short-TTL cached. ACP-only:
+    // print mode keeps its own post-spawn ENOENT→503.
+    if (mode === 'acp') {
+      const probe = deps.probeDevinCliAvailable || probeDevinCliAvailable;
+      const status = await probe();
+      if (status && status.available === false) {
+        // 503 backend_unavailable — same shape the post-spawn ENOENT path emits,
+        // so the upper layer (failover / client) handles it identically. The
+        // pool is untouched because no account was checked out.
+        return errorResponse(
+          503,
+          'backend_unavailable',
+          `Devin CLI is not available for ACP routing (${status.reason || 'unavailable'}). Install the CLI or set DEVIN_CLI_PATH.`,
+          { backend: 'devin-cli', probe_reason: status.reason || 'unavailable' },
+        );
+      }
+    }
     if (process.env.DEVIN_CLI_USE_ACCOUNT_POOL !== '0') {
       const checkout = deps.checkoutAccount || checkoutAccount;
       acct = await checkout(route?.callerKey || '', modelKey);
@@ -726,7 +763,6 @@ export async function handleSpecialAgentChatCompletion(body, route, deps = {}) {
         return errorResponse(503, 'pool_exhausted', 'No active account is available for Devin CLI special-agent backend.');
       }
     }
-    const mode = String(process.env.DEVIN_CLI_MODE || 'print').trim().toLowerCase();
     const runner = mode === 'acp'
       ? (deps.runDevinAcp || runDevinAcp)
       : (deps.runDevinPrint || runDevinPrint);
