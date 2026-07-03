@@ -741,6 +741,18 @@ describe('parseToolCallTagMap (native tool-call decode gate)', () => {
       { outer: 12 },
     );
   });
+  it('parses the CONFIRMED calibrated tags (static disasm 2026-07-04, all 7 subfields)', () => {
+    // verified-from-binary: encode_raw @0x1442fe1f0 + merge_field jump table.
+    // Locks the value shipped in .devin-connect-calibrated.env so a typo can't
+    // silently ship the wrong outer tag (the old #2 guess was wrong; it's #6).
+    assert.deepEqual(
+      __testing.parseToolCallTagMap({
+        DEVIN_CONNECT_TOOL_CALL_TAGS:
+          'outer=6,id=1,name=2,arguments_json=3,invalid_json_str=4,invalid_json_err=5,is_custom_tool_call=6',
+      }),
+      { outer: 6, id: 1, name: 2, arguments_json: 3, invalid_json_str: 4, invalid_json_err: 5, is_custom_tool_call: 6 },
+    );
+  });
 });
 
 describe('decodeFrame native tool calls (gated)', () => {

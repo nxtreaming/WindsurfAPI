@@ -427,18 +427,18 @@ function parseBillingTagMap(env = process.env) {
 // OFF → tool calls keep coming from prompt emulation (parseToolCallsFromText),
 // which works everywhere and remains the only production path.
 //
-// Once a paid capture (DEVIN_CONNECT_DEBUG_META frame dump) reveals the tags, pin them
-// (tag numbers below are placeholders for the doc only — DO NOT trust them):
-//   DEVIN_CONNECT_TOOL_CALL_TAGS="outer=N,id=N,arguments_json=N,is_custom_tool_call=N,invalid_json_str=N,invalid_json_err=N"
-// `outer` is the repeated delta_tool_calls tag on the top-level frame; the rest
-// are subfields of each ChatToolCall. Missing keys are simply not read.
+// Tags PINNED from static disasm of devin.exe (2026-07-04, verified-from-binary):
+//   DEVIN_CONNECT_TOOL_CALL_TAGS="outer=6,id=1,name=2,arguments_json=3,invalid_json_str=4,invalid_json_err=5,is_custom_tool_call=6"
+// `outer` is the repeated delta_tool_calls tag on the top-level frame (#6, from the
+// merge_field jump table); the rest are ChatToolCall subfields, read from prost
+// encode_raw @0x1442fe1f0. Re-verify with scripts/re/proto_tags.py. Missing keys
+// are simply not read. See .devin-connect-calibrated.env for the pinned values.
 export function parseToolCallTagMap(env = process.env) {
   const raw = String(env.DEVIN_CONNECT_TOOL_CALL_TAGS || '').trim();
   if (!raw) return null;
   const map = {};
-  // The [verified]-name subfields, plus `name` kept as a CANDIDATE key (response-side
-  // ChatToolCall has no verified name field per NW1 §2; an operator may still pin it
-  // if a paid dump proves the release carries one).
+  // All 7 subfield keys are verified-from-binary (encode_raw @0x1442fe1f0 + the
+  // merge_field jump table). `name` is a real ChatToolCall field (#2), not a guess.
   const allowed = ['outer', 'id', 'name', 'arguments_json',
     'is_custom_tool_call', 'invalid_json_str', 'invalid_json_err'];
   for (const pair of raw.split(',')) {
