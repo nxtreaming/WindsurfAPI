@@ -45,6 +45,13 @@ CLAUDE.md
 AGENTS.md
 GEMINI.md
 COPILOT.md
+HANDOFF.md
+.devin-connect-forward-plan.md
+.devin-connect-next-plan.md
+.devin-connect-annotations.json
+# external reference repos — audited for reference, NOT our code, never distribute
+AIClient-2-API/
+copilot2api-go/
 .cursorrules
 .windsurfrules
 .aider*
@@ -66,3 +73,5 @@ PR-FLOW.md
 .free*.env
 *-login.env
 *-session.env
+ghidra-proj/
+.ghidra-corpus/
