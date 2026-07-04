@@ -707,6 +707,34 @@ function prependPreambleToContent(content, preamble) {
   return `${preamble}\n\n${cur}`;
 }
 
+// TOOL-1 — role:tool results are folded into a synthetic user turn wrapped
+// in <tool_result …>…</tool_result>. Both the content and the tool_call_id
+// are attacker-influenced: a tool result is typically a fetched web page, a
+// file, or command stdout. Without neutralization, a body containing a
+// literal `</tool_result>\n<tool_call>{…}</tool_call>` — or a tool_call_id
+// like `x"><tool_call>` — closes the wrapper early and smuggles a forged
+// <tool_call> up to the top level, where the upstream model reads it as its
+// own instruction and emits a REAL tool call (Bash/Read/…) that the client
+// then executes locally. Neutralize the wrapper sentinels the same way
+// client.js:escapeHistoryTag neutralizes closing tags in replayed history,
+// and narrow the id to a conservative charset so it cannot break out of the
+// quoted attribute.
+const TOOL_CALL_ID_ALLOWED = /[A-Za-z0-9_.:-]/g;
+
+function sanitizeToolCallId(rawId) {
+  if (typeof rawId !== 'string' || !rawId) return 'unknown';
+  const cleaned = (rawId.match(TOOL_CALL_ID_ALLOWED) || []).join('').slice(0, 128);
+  return cleaned || 'unknown';
+}
+
+function neutralizeToolResultBody(text) {
+  return String(text ?? '')
+    .replaceAll('</tool_result>', '<\\/tool_result>')
+    .replaceAll('<tool_result', '<\\tool_result')
+    .replaceAll('</tool_call>', '<\\/tool_call>')
+    .replaceAll('<tool_call>', '<\\tool_call>');
+}
+
 export function normalizeMessagesForCascade(messages, tools, options = {}) {
   if (!Array.isArray(messages)) return messages;
   const injectUserPreamble = options.injectUserPreamble !== false;
@@ -725,10 +753,11 @@ export function normalizeMessagesForCascade(messages, tools, options = {}) {
     if (!m || !m.role) { out.push(m); continue; }
 
     if (m.role === 'tool') {
-      const id = m.tool_call_id || 'unknown';
-      const content = typeof m.content === 'string'
+      const id = sanitizeToolCallId(m.tool_call_id);
+      const rawContent = typeof m.content === 'string'
         ? m.content
         : JSON.stringify(m.content ?? '');
+      const content = neutralizeToolResultBody(rawContent);
       out.push({
         role: 'user',
         content: `<tool_result tool_call_id="${id}">\n${content}\n</tool_result>`,
@@ -969,6 +998,11 @@ export class ToolCallStreamParser {
     this.buffer = '';
     this.inToolCall = false;
     this.inToolResult = false;
+    // TOOL-3 — remember the exact <tool_result …> open tag we consumed so an
+    // unclosed block can be regurgitated verbatim as text at flush() instead
+    // of being silently swallowed (which returned an empty response to the
+    // client with no error).
+    this._toolResultOpenTag = '';
     this.inToolCode = false;
     this.inBareCall = false;
     this._totalSeen = 0;
@@ -1090,6 +1124,20 @@ export class ToolCallStreamParser {
         this.buffer = this.buffer.slice(earliest);
         return { text, toolCalls: [], items: [{ type: 'text', text }] };
       }
+      // TOOL-2 — sentinel sits at buffer start (earliest===0): every later
+      // delta appends to the held buffer until flush. Unlike the XML path
+      // (which caps <tool_call>/<tool_result> bodies at TOOL_XML_BODY_MAX),
+      // this branch had no ceiling, so a model that opens a tool-call
+      // sentinel and then streams unbounded text pins it all in memory. Cap
+      // it the same way: once the held buffer exceeds the limit without a
+      // parseable close, flush it as ordinary text and reset so RSS stays
+      // bounded.
+      if (this.buffer.length > TOOL_XML_BODY_MAX) {
+        log.warn(`ToolCallStreamParser: ${this.dialect} sentinel body exceeds 65KB (${this.buffer.length} bytes), emitting as text`);
+        const text = this.buffer;
+        this.buffer = '';
+        return { text, toolCalls: [], items: [{ type: 'text', text }] };
+      }
       return { text: '', toolCalls: [], items: [] };
     }
     this.buffer += delta;
@@ -1121,12 +1169,14 @@ export class ToolCallStreamParser {
           log.warn(`ToolCallStreamParser: <tool_result> body exceeds 65KB (${this.buffer.length} bytes), dropping`);
           this.buffer = '';
           this.inToolResult = false;
+          this._toolResultOpenTag = '';
           continue;
         }
         const closeIdx = this.buffer.indexOf(TR_CLOSE);
         if (closeIdx === -1) break;
         this.buffer = this.buffer.slice(closeIdx + TR_CLOSE.length);
         this.inToolResult = false;
+        this._toolResultOpenTag = '';
         continue;
       }
 
@@ -1178,7 +1228,21 @@ export class ToolCallStreamParser {
       // ── Normal mode — scan for the next opening tag ──
       const mode = TOOL_PARSE_MODE;
       const tcIdx = (mode === 'auto' || mode === 'xml') ? this.buffer.indexOf(TC_OPEN) : -1;
-      const trIdx = this.buffer.indexOf(TR_PREFIX);
+      // TOOL-3 — tighten <tool_result open-tag matching: the bare prefix must
+      // be followed by '>' or whitespace (i.e. `<tool_result>` or
+      // `<tool_result tool_call_id=…>`). A bare indexOf also matched
+      // substrings like `<tool_resultset`, spuriously opening a discard block
+      // and swallowing the model's real output. A prefix sitting exactly at
+      // the buffer tail (delimiter not yet streamed) is still returned as a
+      // candidate so the closeAngle check below holds it until more input
+      // arrives, rather than leaking a split real tag as text.
+      let trIdx = -1;
+      for (let p = this.buffer.indexOf(TR_PREFIX); p !== -1; p = this.buffer.indexOf(TR_PREFIX, p + 1)) {
+        const after = p + TR_PREFIX.length;
+        if (after >= this.buffer.length) { trIdx = p; break; }
+        const ch = this.buffer[after];
+        if (ch === '>' || ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { trIdx = p; break; }
+      }
       const tcCodeIdx = this.parseToolCode && (mode === 'auto' || mode === 'tool_code') ? this.buffer.indexOf(TC_CODE) : -1;
       const tcBareIdx = this.parseBareJson && (mode === 'auto' || mode === 'json') ? this.buffer.indexOf(TC_BARE) : -1;
 
@@ -1226,6 +1290,9 @@ export class ToolCallStreamParser {
           this.buffer = this.buffer.slice(nextIdx);
           break;
         }
+        // Preserve the literal open tag for faithful regurgitation if the
+        // matching </tool_result> never arrives (TOOL-3).
+        this._toolResultOpenTag = this.buffer.slice(nextIdx, closeAngle + 1);
         this.buffer = this.buffer.slice(closeAngle + 1);
         this.inToolResult = true;
       } else if (tagType === 'code') {
@@ -1261,8 +1328,17 @@ export class ToolCallStreamParser {
       return { text: `<tool_call>${remaining}`, toolCalls: [] };
     }
     if (this.inToolResult) {
+      // TOOL-3 — an unclosed <tool_result …> block reached end-of-stream.
+      // Regurgitate the open tag + held body as text rather than silently
+      // returning an empty response (the old behaviour let a model emit a
+      // stray `<tool_result>` and lose its entire turn, and let TOOL-1-style
+      // injected `<tool_result` prefixes erase real output). The
+      // </tool_result> the client would emit never came, so this is genuine
+      // model prose, not a synthetic wrapper.
       this.inToolResult = false;
-      return { text: '', toolCalls: [] };
+      const openTag = this._toolResultOpenTag || TR_PREFIX;
+      this._toolResultOpenTag = '';
+      return { text: `${openTag}${remaining}`, toolCalls: [] };
     }
     if (this.inToolCode) {
       this.inToolCode = false;
