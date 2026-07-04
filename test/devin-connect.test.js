@@ -467,6 +467,64 @@ describe('decodeFrame', () => {
   });
 });
 
+describe('decodeFrame malformed-frame resilience (FRAME-1)', () => {
+  // A malformed upstream frame must degrade to an empty delta, never throw:
+  // decodeFrame runs inside res.on('data'), so a synchronous throw there escapes
+  // the streamChat generator's try/finally → uncaughtException → process.exit(1),
+  // taking down every concurrent tenant over one bad frame.
+  const EMPTY = { content: '', reasoning: '', finish: null, usage: null, billing: null };
+
+  it('returns an empty delta (no throw) on an unknown wire type at the top level', () => {
+    // wire type 7 is illegal; parseFields throws "Unknown wire type 7".
+    // tag = (field<<3)|7 = (1<<3)|7 = 15.
+    const payload = Buffer.from([0x0f]);
+    let d;
+    assert.doesNotThrow(() => { d = decodeFrame(payload); });
+    assert.deepEqual(d, EMPTY);
+  });
+
+  it('returns an empty delta (no throw) on a truncated varint at the top level', () => {
+    // tag byte says field #1 varint (0x08), then a varint with the continuation
+    // bit set but no following byte → "Truncated varint".
+    const payload = Buffer.from([0x08, 0x80]);
+    let d;
+    assert.doesNotThrow(() => { d = decodeFrame(payload); });
+    assert.deepEqual(d, EMPTY);
+  });
+
+  it('returns an empty delta (no throw) on a truncated length-delimited field', () => {
+    // field #3 (content), wire type 2 → tag 0x1a; declared length 10 but only 3
+    // bytes follow → "truncated len-delim field".
+    const payload = Buffer.concat([Buffer.from([0x1a, 0x0a]), Buffer.from('abc')]);
+    let d;
+    assert.doesNotThrow(() => { d = decodeFrame(payload); });
+    assert.deepEqual(d, EMPTY);
+  });
+
+  it('does not throw when the #7 metadata sub-message body is malformed protobuf', () => {
+    // Outer frame parses fine, but the length-delimited #7 payload is itself an
+    // illegal wire type (7) → the nested parseFields(meta.value) would throw.
+    // Content still decodes; usage degrades to null.
+    const payload = Buffer.concat([
+      writeStringField(3, 'hello'),
+      writeMessageField(7, Buffer.from([0x0f])),
+    ]);
+    let d;
+    assert.doesNotThrow(() => { d = decodeFrame(payload); });
+    assert.equal(d.content, 'hello');
+    assert.equal(d.usage, null);
+    assert.equal(d.billing, null);
+  });
+
+  it('processes valid fields following the same rules (well-formed frame unaffected)', () => {
+    // Regression guard: the try/catch must not swallow good frames.
+    const payload = Buffer.concat([writeStringField(3, 'ok'), writeVarintField(5, 2)]);
+    const d = decodeFrame(payload);
+    assert.equal(d.content, 'ok');
+    assert.equal(d.finish, 2);
+  });
+});
+
 describe('mapFinishReason', () => {
   it('maps the live-anchored stop enum (2) to "stop"', () => {
     assert.equal(mapFinishReason(2), 'stop');
@@ -1052,6 +1110,59 @@ describe('streamChat signature surface (gated, mock transport)', () => {
       const finish = events.find(e => e.type === 'finish');
       assert.equal(finish.reasoning_signature, 'ErUBCg');
       assert.equal(finish.signature.text, 'ErUBCg');
+    } finally { __setRequestImpl(null); }
+  });
+});
+
+describe('streamChat malformed-frame resilience (FRAME-1, mock transport)', () => {
+  // End-to-end proof of the FRAME-1 fix: a malformed data frame arriving mid-stream
+  // must NOT propagate out of res.on('data') as an uncaughtException. Before the fix
+  // decodeFrame threw synchronously inside the data callback, crashing the process
+  // and every concurrent tenant; now the bad frame is skipped and the good frames
+  // (before and after it) still stream to completion.
+  function mockTransportRaw(rawFrames) {
+    return (opts, cb) => {
+      const req = new EventEmitter();
+      req.destroyed = false;
+      req.setTimeout = () => req;
+      req.write = () => {};
+      req.end = () => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        setImmediate(() => {
+          for (const f of rawFrames) res.emit('data', f);
+          res.emit('data', endOfStreamEnvelope());
+          res.emit('end');
+        });
+        cb(res);
+      };
+      req.destroy = () => { req.destroyed = true; };
+      return req;
+    };
+  }
+
+  it('skips a malformed data frame and still yields the surrounding content', async () => {
+    // frame 1: valid content. frame 2: an unknown wire type (0x0f) that makes
+    // parseFields throw. frame 3: valid content + finish. All wrapped uncompressed.
+    const good1 = wrapEnvelope(writeStringField(3, 'before'), { compress: false });
+    const bad = wrapEnvelope(Buffer.from([0x0f]), { compress: false });
+    const good2 = wrapEnvelope(
+      Buffer.concat([writeStringField(3, 'after'), writeVarintField(5, 2)]),
+      { compress: false });
+    __setRequestImpl(mockTransportRaw([good1, bad, good2]));
+    try {
+      const events = [];
+      // The whole point: this loop must complete normally (no throw/crash).
+      for await (const ev of streamChat({
+        messages: [{ role: 'user', content: 'hi' }],
+        model: 'claude-opus-4-8',
+        token: 'devin-session-token$fake.jwt.sig',
+        env: { DEVIN_CONNECT_TOKEN: 'devin-session-token$fake.jwt.sig' },
+      })) events.push(ev);
+      const text = events.filter(e => e.type === 'content').map(e => e.text).join('');
+      assert.equal(text, 'beforeafter');
+      const finish = events.find(e => e.type === 'finish');
+      assert.ok(finish, 'stream reached its terminal finish event despite the bad frame');
     } finally { __setRequestImpl(null); }
   });
 });

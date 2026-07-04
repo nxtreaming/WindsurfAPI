@@ -650,7 +650,20 @@ function decodeSubMessage(f, into) {
  *             billing: object|null }}
  */
 export function decodeFrame(payload, opts = {}) {
-  const fields = parseFields(payload);
+  // Malformed / truncated upstream protobuf must never bubble out of here: this
+  // runs inside the res.on('data') callback (devin-connect.js:1097), and a synchronous
+  // throw there escapes the streamChat generator's try/finally and lands as an
+  // uncaughtException → index.js process.exit(1), tearing down every concurrent
+  // tenant's connection over one bad frame from the upstream / US-proxy. parseFields
+  // throws on unknown wire types (3/4/6/7) and truncated varints/len-delims; treat any
+  // such frame as an empty delta and skip it, matching the defensive contract already
+  // applied on the parseTrajectorySteps hot path (audit FRAME-1).
+  let fields;
+  try { fields = parseFields(payload); }
+  catch (err) {
+    log.warn(`DEVIN_CONNECT: skipping malformed frame (parse failed): ${err.message}`);
+    return { content: '', reasoning: '', finish: null, usage: null, billing: null };
+  }
   const content = getField(fields, FIELD.CONTENT, 2);
   const reasoning = getField(fields, FIELD.REASONING, 2);
   const finish = getField(fields, FIELD.FINISH, 0);
@@ -705,7 +718,14 @@ export function decodeFrame(payload, opts = {}) {
   let billing = null;
   let metaDump = null;
   if (meta) {
-    const mf = parseFields(meta.value);
+    // Same defensive contract as the top-level parse: the #7 metadata sub-message
+    // is length-delimited so its bounds are valid, but its CONTENTS can still be
+    // malformed protobuf (unknown wire type / truncated varint). A throw here would
+    // escape res.on('data') → uncaughtException just the same, so treat an
+    // unparseable meta block as "no usage/billing" rather than crashing (audit FRAME-1).
+    let mf;
+    try { mf = parseFields(meta.value); }
+    catch (err) { log.warn(`DEVIN_CONNECT: skipping malformed frame metadata: ${err.message}`); mf = []; }
     const prompt = getField(mf, 2, 0);
     const completion = getField(mf, 3, 0);
     // completion_tokens only rides the final metadata frame; treat the pair as
