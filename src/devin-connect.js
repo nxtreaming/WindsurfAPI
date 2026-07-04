@@ -169,27 +169,80 @@ function encodeImageData(img) {
 // inner message. So native tool defs are OFF by default: WindsurfAPI keeps folding
 // tools into the prompt (tool-emulation), which works on every model.
 //
-// When an operator calibrates the inner tags against a paid capture, set e.g.
-// DEVIN_CONNECT_TOOL_DEF_TAGS="10,1,2,3" (outer repeated tag, then name/desc/schema
-// subfield tags). The encoder then emits real ToolDef sub-messages. Default unset
-// → getToolDefTags() returns null → nothing emitted, identical to today.
+// The OUTER tag is VERIFIED-FROM-BINARY: GetChatMessageRequest.tools lives at
+// #10 (CALIBRATED.proto, a live capture carried ~24 ToolDefs there). So the
+// operator no longer has to supply it — outer defaults to 10. What is still
+// UNCALIBRATED is the ToolDefinition INNER layout (name/description/parameters
+// tag numbers, and whether parameters rides as a JSON string or a nested
+// message). Those stay behind the env gate until a paid capture or static RE
+// pins them — until then getToolDefTags() returns null and tools keep folding
+// into the prompt (tool-emulation), which works on every model.
+//
+// Accepted forms of DEVIN_CONNECT_TOOL_DEF_TAGS (fail-closed to null on any
+// malformed value — never emit a broken frame):
+//   - key=val:   "name=1,description=2,parameters=3[,strict=6][,outer=10]"
+//   - positional (back-compat): STRICT 4-tuple "10,1,2,3" = outer,name,description,schema.
+// To omit outer (use the #10 default), use the key=val form — a positional
+// 3-tuple is ambiguous and fails closed to null.
+// name/description/parameters are MANDATORY; missing any → null.
+// custom_tool / defer_loading are Devin-proprietary with no OpenAI source and
+// are deliberately NOT accepted (emitting them risks a broken frame).
+const TOOL_DEF_INT_MAX = 536870912; // 2^29, protobuf field-number ceiling
+function validTag(n) { return Number.isInteger(n) && n > 0 && n < TOOL_DEF_INT_MAX; }
 export function getToolDefTags(env = process.env) {
   const raw = String(env.DEVIN_CONNECT_TOOL_DEF_TAGS || '').trim();
   if (!raw) return null; // unset → native tool defs disabled (prompt emulation stays)
-  const nums = raw.split(',').map((s) => Number.parseInt(s.trim(), 10));
-  if (nums.length !== 4 || nums.some((n) => !Number.isInteger(n) || n <= 0 || n >= 536870912)) {
-    return null; // malformed → fail closed to emulation, never a broken frame
+
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const map = {};
+  if (parts.some((p) => p.includes('='))) {
+    // key=val form
+    for (const p of parts) {
+      const [k, v] = p.split('=').map((s) => s.trim());
+      const n = Number.parseInt(v, 10);
+      // Only accept keys we know how to emit; silently ignore proprietary ones
+      // so a stray custom_tool= can't break the whole gate.
+      if (['outer', 'name', 'description', 'parameters', 'schema', 'strict'].includes(k) && validTag(n)) {
+        map[k === 'schema' ? 'parameters' : k] = n;
+      }
+    }
+  } else {
+    // positional form is back-compat ONLY and STRICT: exactly 4 numbers =
+    // outer,name,description,schema(=parameters). A 3- or 5-tuple is ambiguous
+    // (is "10,1,2" outer,name,desc-missing-params, or name,desc,params?) so we
+    // fail closed to null — use the explicit key=val form to omit outer.
+    const nums = parts.map((s) => Number.parseInt(s, 10));
+    if (nums.length !== 4 || nums.some((n) => !validTag(n))) return null;
+    [map.outer, map.name, map.description, map.parameters] = nums;
   }
-  const [outer, name, description, schema] = nums;
-  return { outer, name, description, schema };
+
+  if (map.outer === undefined) map.outer = 10; // VFB default
+  // Mandatory inner tags; without all three there's nothing coherent to emit.
+  if (!validTag(map.outer) || !validTag(map.name) || !validTag(map.description) || !validTag(map.parameters)) {
+    return null; // fail closed to emulation
+  }
+  // `schema` kept as an alias of `parameters` for back-compat with existing
+  // callers/tests that read tags.schema.
+  const out = { outer: map.outer, name: map.name, description: map.description, parameters: map.parameters, schema: map.parameters };
+  if (validTag(map.strict)) out.strict = map.strict;
+  return out;
 }
 
 /**
  * Encode one ToolDef sub-message from an OpenAI function-tool entry
- * ({ type:'function', function:{ name, description, parameters } }). The JSON
- * schema is serialized to a string for the schema subfield — the exact wire
- * representation (string vs nested message) is unconfirmed; string is the safe
- * first calibration target and matches how most prost tool schemas ride.
+ * ({ type:'function', function:{ name, description, parameters, strict } }).
+ *
+ * parameters (the JSON Schema) is serialized to a STRING. Rationale: static RE
+ * ruled out a nested google.protobuf.Struct (Struct/Value type count in the
+ * binary is 0), and schemars→JSON + serde_json RawValue evidence points to a
+ * serialized-JSON field. string vs bytes share wiretype 2 and are byte-identical
+ * on the wire, so if a paid capture ever proves bytes, the ONLY change is
+ * swapping writeStringField→writeBytesField here (zero risk). ← SWITCH POINT.
+ *
+ * strict (OpenAI function.strict) is emitted as a varint bool ONLY when the
+ * operator calibrated a `strict` tag AND the tool asked for it. custom_tool /
+ * defer_loading are Devin-proprietary and never emitted (getToolDefTags rejects
+ * their keys).
  */
 function encodeToolDef(tool, tags) {
   const fn = tool?.function || {};
@@ -197,7 +250,11 @@ function encodeToolDef(tool, tags) {
   if (fn.name) fields.push(writeStringField(tags.name, String(fn.name)));
   if (fn.description) fields.push(writeStringField(tags.description, String(fn.description)));
   if (fn.parameters !== undefined) {
-    fields.push(writeStringField(tags.schema, JSON.stringify(fn.parameters)));
+    // SWITCH POINT (see header): string today; writeBytesField if RE/capture proves bytes.
+    fields.push(writeStringField(tags.parameters, JSON.stringify(fn.parameters)));
+  }
+  if (tags.strict && fn.strict === true) {
+    fields.push(writeVarintField(tags.strict, 1));
   }
   return Buffer.concat(fields);
 }

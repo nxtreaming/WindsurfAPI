@@ -739,11 +739,33 @@ describe('getToolDefTags (native tool-def gate)', () => {
     assert.equal(getToolDefTags({}), null);
     assert.equal(getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: '  ' }), null);
   });
-  it('parses a 4-tuple "outer,name,description,schema"', () => {
+  it('parses a 4-tuple "outer,name,description,schema" (parameters is the primary key, schema kept as back-compat alias)', () => {
     assert.deepEqual(
       getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: '10,1,2,3' }),
-      { outer: 10, name: 1, description: 2, schema: 3 },
+      { outer: 10, name: 1, description: 2, parameters: 3, schema: 3 },
     );
+  });
+  it('key=val form: outer defaults to the VFB #10 when omitted', () => {
+    assert.deepEqual(
+      getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: 'name=1,description=2,parameters=3' }),
+      { outer: 10, name: 1, description: 2, parameters: 3, schema: 3 },
+    );
+  });
+  it('key=val form: strict is optional and only kept when a valid tag is given', () => {
+    const withStrict = getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: 'name=1,description=2,parameters=3,strict=6' });
+    assert.equal(withStrict.strict, 6);
+    const noStrict = getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: 'name=1,description=2,parameters=3' });
+    assert.equal(noStrict.strict, undefined);
+  });
+  it('rejects Devin-proprietary keys (custom_tool/defer_loading) silently — they are never emitted', () => {
+    // A stray proprietary key must not break the gate; it is ignored, and the
+    // mandatory trio still resolves.
+    const t = getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: 'name=1,description=2,parameters=3,custom_tool=4,defer_loading=5' });
+    assert.deepEqual(t, { outer: 10, name: 1, description: 2, parameters: 3, schema: 3 });
+  });
+  it('key=val form fails closed when a mandatory inner tag is missing', () => {
+    assert.equal(getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: 'name=1,description=2' }), null); // no parameters
+    assert.equal(getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: 'outer=10,name=1' }), null);
   });
   it('fails closed (→ null) on wrong arity or garbage', () => {
     assert.equal(getToolDefTags({ DEVIN_CONNECT_TOOL_DEF_TAGS: '10,1,2' }), null);
@@ -786,15 +808,39 @@ describe('native tool defs in the request (gated)', () => {
     }
   });
 
-  it('skips non-function tool entries even when calibrated', () => {
+  it('emits the strict varint only when the strict tag is calibrated AND function.strict is true', () => {
     const prev = process.env.DEVIN_CONNECT_TOOL_DEF_TAGS;
-    process.env.DEVIN_CONNECT_TOOL_DEF_TAGS = '10,1,2,3';
+    process.env.DEVIN_CONNECT_TOOL_DEF_TAGS = 'name=1,description=2,parameters=3,strict=6';
+    try {
+      const strictTool = [{ type: 'function', function: { name: 'f', description: 'd', parameters: {}, strict: true } }];
+      const proto = buildGetChatMessageRequest({
+        token: TOKEN, model: 'm', messages: [{ role: 'user', content: 'x' }], tools: strictTool,
+      });
+      const td = parseFields(getAllFields(parseFields(proto), 10)[0].value);
+      assert.equal(Number(getField(td, 6, 0).value), 1, 'strict=6 varint emitted as 1');
+
+      // strict:false (or absent) → no #6 field
+      const noStrict = buildGetChatMessageRequest({
+        token: TOKEN, model: 'm', messages: [{ role: 'user', content: 'x' }],
+        tools: [{ type: 'function', function: { name: 'f', description: 'd', parameters: {} } }],
+      });
+      const td2 = parseFields(getAllFields(parseFields(noStrict), 10)[0].value);
+      assert.equal(getField(td2, 6, 0), null, 'no strict field when function.strict absent');
+    } finally {
+      if (prev === undefined) delete process.env.DEVIN_CONNECT_TOOL_DEF_TAGS;
+      else process.env.DEVIN_CONNECT_TOOL_DEF_TAGS = prev;
+    }
+  });
+
+  it('defaults outer to the VFB #10 when the gate omits it (key=val form)', () => {
+    const prev = process.env.DEVIN_CONNECT_TOOL_DEF_TAGS;
+    process.env.DEVIN_CONNECT_TOOL_DEF_TAGS = 'name=1,description=2,parameters=3';
     try {
       const proto = buildGetChatMessageRequest({
-        token: TOKEN, model: 'm', messages: [{ role: 'user', content: 'x' }],
-        tools: [{ type: 'retrieval' }, { type: 'function', function: { name: '' } }],
+        token: TOKEN, model: 'm', messages: [{ role: 'user', content: 'x' }], tools: TOOLS,
       });
-      assert.equal(getAllFields(parseFields(proto), 10).length, 0);
+      // outer defaulted to 10 → ToolDef rides at #10 exactly as the positional form.
+      assert.equal(getAllFields(parseFields(proto), 10).filter(f => f.wireType === 2).length, 1);
     } finally {
       if (prev === undefined) delete process.env.DEVIN_CONNECT_TOOL_DEF_TAGS;
       else process.env.DEVIN_CONNECT_TOOL_DEF_TAGS = prev;

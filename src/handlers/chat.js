@@ -39,7 +39,7 @@ import {
 import { selectBackend, usesCascadeFlow } from '../backend-router.js';
 import { toChatCompletion as _toChatCompletion, streamChatCompletion as _streamChatCompletion } from '../devin-connect-openai.js';
 import { resolveConnectSelector } from '../devin-connect-models.js';
-import { isRetryable as isConnectRetryable } from '../devin-connect.js';
+import { isRetryable as isConnectRetryable, getToolDefTags, parseToolCallTagMap } from '../devin-connect.js';
 import { isRouterModel, assignModel } from '../devin-connect-catalog.js';
 import { bumpConnect } from '../devin-connect-metrics.js';
 import { sanitizeText, sanitizeToolCall, PathSanitizeStream } from '../sanitize.js';
@@ -2061,8 +2061,22 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // rewrite BEFORE the connect call so no role:'tool' message survives to
     // devin-connect.js's non-protocol [tool result] text wrapper.
     const emulateTools = Array.isArray(effectiveTools) && effectiveTools.length > 0;
+    // Double-send guard (#49): when the native ToolDef gate is calibrated, tools
+    // also ride natively in the #10 `tools` field (connectParams.tools below), so
+    // re-describing them in the prompt preamble is redundant and gives the model
+    // conflicting instructions. Suppress the preamble ONLY when BOTH gates are on:
+    //  - def gate (getToolDefTags): tools are encoded natively, no need to list
+    //    them in prose.
+    //  - call gate (parseToolCallTagMap): the response carries native tool_calls,
+    //    so we don't need the `<tool_call>` markup contract in the preamble either.
+    // If only the def gate is on, the response still comes back as <tool_call>
+    // markup, so the preamble's protocol instructions MUST stay. role:tool /
+    // assistant history folding always runs (still needed until the msg gate lands).
+    const nativeDefsOn = emulateTools && !!getToolDefTags();
+    const nativeCallsOn = !!parseToolCallTagMap();
+    const suppressPreamble = nativeDefsOn && nativeCallsOn;
     const connectMessages = emulateTools
-      ? normalizeMessagesForCascade(messages, effectiveTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice })
+      ? normalizeMessagesForCascade(messages, effectiveTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble })
       : messages;
     log.info(`Chat[${reqId}]: DEVIN_CONNECT ${reqModelName} -> selector=${selector}${mapped ? '' : ' [unmapped→free-tier]'} stream=${!!stream}${emulateTools ? ` tools=${effectiveTools.length}` : ''}`);
     const ccId = genId();

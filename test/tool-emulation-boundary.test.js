@@ -143,3 +143,26 @@ describe('TOOL-2 non-XML dialect buffer ceiling', () => {
     assert.equal(f.toolCalls[0].name, 'Read');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #49 double-send guard: injectUserPreamble:false must suppress the prompt
+// preamble (used by chat.js when BOTH native def+call gates are on, so tools
+// don't get described twice — once in protobuf #10, once in prose).
+// ---------------------------------------------------------------------------
+describe('injectUserPreamble switch (native double-send guard)', () => {
+  const TOOLS = [{ type: 'function', function: { name: 'get_weather', description: 'Get weather', parameters: {} } }];
+  const MSGS = [{ role: 'user', content: 'weather in NYC?' }];
+
+  it('injects the tool preamble by default (emulation path unchanged)', () => {
+    const out = normalizeMessagesForCascade(MSGS, TOOLS, { route: 'devin_connect' });
+    const joined = out.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+    assert.ok(/get_weather/.test(joined), 'default path must describe the tool in-prompt');
+  });
+
+  it('suppresses the preamble when injectUserPreamble:false (both native gates on)', () => {
+    const out = normalizeMessagesForCascade(MSGS, TOOLS, { route: 'devin_connect', injectUserPreamble: false });
+    const joined = out.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+    // The tool must NOT be described in prose — it rides natively in protobuf #10 instead.
+    assert.ok(!/get_weather/.test(joined), 'preamble must be suppressed so tools are not double-sent');
+  });
+});
