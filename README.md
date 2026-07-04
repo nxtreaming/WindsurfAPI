@@ -21,7 +21,7 @@
 - `POST /v1/chat/completions` — **OpenAI 兼容** 任何 OpenAI SDK 直接用
 - `POST /v1/messages` — **Anthropic 兼容** Claude Code / Cline / Cursor 直接连
 
-**100+ 模型**：Claude 4.5/4.6/Opus 4.7 · GPT-5/5.1/5.2/5.4 全系 · Gemini 2.5/3.0/3.1 · Grok · Qwen · Kimi K2.x · GLM 4.7/5/5.1/5.2 · MiniMax · SWE 1.5/1.6 · Arena 等。零 npm 依赖 纯 Node.js。
+**100+ 模型**：Claude 4.5/4.6/Opus 4.7 · GPT-5/5.1/5.2/5.4 全系 · Gemini 2.5/3.0/3.1 · Grok · Qwen · Kimi K2.x · GLM 4.7/5/5.1/5.2 · MiniMax · SWE 1.5/1.6 · Arena 等。单一运行时依赖（jimp）· 近乎纯 Node.js。
 
 ## 它到底在干嘛
 
@@ -357,7 +357,7 @@ swe-1.5 / 1.5-fast / 1.6 / 1.6-fast · arena-fast · arena-smart
 
 ## 架构要点
 
-- **零 npm 依赖** 全走 `node:*` 内置 · protobuf 手搓（`src/proto.js`）· 下载即跑
+- **单一运行时依赖**（`jimp`，仅用于图片降采样）· 其余全走 `node:*` 内置 · protobuf 手搓（`src/proto.js`）· `npm install` 即跑
 - **账号池 + LS 池** 每个独立 proxy 一个 LS 实例 不混用
 - **NO_TOOL 模式** `planner_mode=3` 关掉 Cascade 内置工具循环，避免 `/tmp/windsurf-workspace/` 路径泄漏
 - **三层 sanitize** LS 内建工具结果过滤 · `<tool_call>` 文本解析 · 输出路径清洗

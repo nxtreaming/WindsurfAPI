@@ -29,7 +29,7 @@ loopback `127.0.0.1:3003` per memory `homecloud-deploy`):
 
 ```sh
 DEVIN_CONNECT=1
-API_KEY=sk-dwgxnbnb        # existing downstream proxy key — unchanged
+API_KEY=sk-REDACTED        # existing downstream proxy key — unchanged
 # accounts.json already holds the free session token(s) — nothing else required
 ```
 
@@ -67,11 +67,11 @@ No `npm install` needed unless `package.json` changed (it didn't for this work).
 
 ```sh
 # zero-billable preflight first (no model calls):
-API_KEY=sk-dwgxnbnb BASE_URL=http://127.0.0.1:3003 \
+API_KEY=sk-REDACTED BASE_URL=http://127.0.0.1:3003 \
   CONNECT_SMOKE_REAL_CALLS=0 npm run smoke:devin-connect
 
 # then one real free-model call to confirm the chat path yields tokens:
-API_KEY=sk-dwgxnbnb BASE_URL=http://127.0.0.1:3003 \
+API_KEY=sk-REDACTED BASE_URL=http://127.0.0.1:3003 \
   npm run smoke:devin-connect
 ```
 
@@ -82,7 +82,7 @@ Quick manual sanity check:
 
 ```sh
 curl -s http://127.0.0.1:3003/v1/chat/completions \
-  -H "Authorization: Bearer sk-dwgxnbnb" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-REDACTED" -H "Content-Type: application/json" \
   -d '{"model":"swe-1-6-slow","messages":[{"role":"user","content":"ping"}]}' \
   | head -c 400
 ```

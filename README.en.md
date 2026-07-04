@@ -21,7 +21,7 @@ Turns [Windsurf](https://windsurf.com) (formerly Codeium)'s AI models into **two
 - `POST /v1/chat/completions` — **OpenAI Compatible** for any OpenAI SDK.
 - `POST /v1/messages` — **Anthropic Compatible** for direct connection with Claude Code / Cline / Cursor.
 
-**100+ Models**: Claude 4.5/4.6/Opus 4.7 · GPT-5/5.1/5.2/5.4 series · Gemini 2.5/3.0/3.1 · Grok · Qwen · Kimi K2.x · GLM 4.7/5/5.1/5.2 · MiniMax · SWE 1.5/1.6 · Arena, etc. Zero npm dependencies, pure Node.js.
+**100+ Models**: Claude 4.5/4.6/Opus 4.7 · GPT-5/5.1/5.2/5.4 series · Gemini 2.5/3.0/3.1 · Grok · Qwen · Kimi K2.x · GLM 4.7/5/5.1/5.2 · MiniMax · SWE 1.5/1.6 · Arena, etc. Single runtime dependency (jimp), near-pure Node.js.
 
 ## What is it doing?
 
@@ -366,7 +366,7 @@ The service automatically detects Chinese, Japanese, or Korean characters in you
 
 ## Architecture Highlights
 
-- **Zero npm dependencies** Everything uses `node:*` built-ins · Protobuf is handcrafted (`src/proto.js`) · Download and run.
+- **Single runtime dependency** (`jimp`, for image downscaling only) · everything else uses `node:*` built-ins · Protobuf is handcrafted (`src/proto.js`) · `npm install` and run.
 - **Account Pool + LS Pool** Each independent proxy gets its own LS instance, no mixing.
 - **NO_TOOL Mode** `planner_mode=3` disables Cascade's built-in tool loop to prevent `/tmp/windsurf-workspace/` path leakage.
 - **Three-layer sanitization** LS built-in tool result filtering · `<tool_call>` text parsing · Output path cleaning.

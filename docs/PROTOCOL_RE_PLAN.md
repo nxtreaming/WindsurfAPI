@@ -4,12 +4,12 @@ Status: planning artifact (2026-06-10). Goal: make WindsurfAPI's reverse-enginee
 Cascade protocol layer complete/correct ("protocol perfect"), at cliproxyapi-class
 quality. Execute heavy inventory, trace analysis, and test work in the lab workflow
 when backend access is available; one backend was returning `503` from
-`v-api.hk.yesfuture.ai` at planning time. Keep credentials out of prompts, logs, and
+`<UPSTREAM_HOST>` at planning time. Keep credentials out of prompts, logs, and
 repo files.
 
 ## Lab box runbook (the RE asset)
 
-- Host `154.40.36.22` (Debian 12, 7.8G RAM). Password SSH via `scripts/vps-exec.py`
+- Host `<LAB_HOST>` (Debian 12, 7.8G RAM). Password SSH via `scripts/vps-exec.py`
   (`WINDSURFAPI_VPS_HOST/USER/PASS` env). Credentials are held by the user, session-only —
   NEVER write them to disk/git/logs. (SSH key auth is rejected by this image's sshd.)
 - Service: systemd unit `windsurfapi`, repo `/root/WindsurfAPI`, running v2.0.144,
@@ -90,5 +90,5 @@ for parser changes and verification. Keep credentials out of prompts and logs.
 ## Verification + release rules (unchanged)
 Per [docs/MAINTAINER_NOTES.md]: focused tests + `npm run test:release` + `npm run secret-scan`,
 full shards on non-trivial blast radius, then commit/tag/push, verify CI/Release, deploy +
-smoke. Production VPS (43.153.139.136) still runs v2.0.142; deploying needs prod creds.
+smoke. Production VPS (<PROD_VPS>) still runs v2.0.142; deploying needs prod creds.
 Never widen native-bridge production defaults from a single lab success.
