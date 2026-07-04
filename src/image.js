@@ -4,6 +4,9 @@ import { lookup as dnsLookup } from 'node:dns';
 import { log } from './config.js';
 import { tryExtractPdf } from './pdf.js';
 import { isPrivateIp, resolvePublicAddresses } from './net-safety.js';
+import { decodePng } from './vendor/png.js';
+import jpegDecode from './vendor/jpeg-js/decoder.js';
+import jpegEncode from './vendor/jpeg-js/encoder.js';
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_BASE64_LEN = Math.ceil(MAX_SIZE * 4 / 3) + 100;
@@ -20,11 +23,11 @@ const MIME_OK = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 //
 // Pure-Node header parsing (format detection, dimension reads, oversize
 // classification) is the cheap fast path. Actual pixel downscale / re-encode
-// is done by `shrinkPixels` via jimp (the project's first runtime dep — pure
-// JS, zero native binaries / install scripts). jimp is lazily imported inside
-// `shrinkPixels` so the cost is only paid when an oversized image actually
-// needs re-encoding, and a jimp load/decode failure degrades to a safe
-// passthrough rather than failing the request or the server.
+// is done by `shrinkPixels` using vendored zero-dependency codecs (a pure-Node
+// PNG decoder over node:zlib + the BSD-3 jpeg-js decode/encode, both under
+// `src/vendor/`). Any decode/encode failure — including an unsupported format
+// such as WebP or an exotic PNG variant — degrades to a safe passthrough rather
+// than failing the request or the server.
 //
 // What this module does:
 //   - magic-byte format detection (corrects a mislabeled media_type so the
@@ -49,12 +52,56 @@ const IMAGE_JPEG_QUALITY = parseInt(process.env.WINDSURFAPI_IMAGE_JPEG_QUALITY |
 // image could not be decoded). A re-encode normally lands far below this.
 const IMAGE_MAX_BASE64_LEN = MAX_BASE64_LEN;
 
-// Lazy, cached jimp loader. Pure-JS dep; if loading ever fails we fall back to
-// a passthrough so image handling degrades gracefully instead of throwing.
-let _jimpPromise = null;
-function loadJimp() {
-  if (!_jimpPromise) _jimpPromise = import('jimp').then((m) => m.Jimp);
-  return _jimpPromise;
+// Decode a PNG or JPEG buffer to { width, height, data:RGBA } using the vendored
+// zero-dependency codecs. WebP / GIF / exotic variants throw here, which the
+// caller turns into a safe passthrough. Format is decided by magic bytes, not the
+// declared label, so a mislabeled image still decodes.
+function decodePixels(buf) {
+  const b = buf.subarray(0, 4);
+  // PNG magic: 89 50 4E 47
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+    return decodePng(buf);
+  }
+  // JPEG magic: FF D8
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    const img = jpegDecode(buf, { useTArray: true, maxResolutionInMP: 200, maxMemoryUsageInMB: 512 });
+    return { width: img.width, height: img.height, data: img.data };
+  }
+  throw new Error('unsupported image format for re-encode (only PNG/JPEG)');
+}
+
+// Bilinear downscale of an RGBA buffer to (dstW x dstH). Pure Node, no deps.
+// Only ever called to shrink, so no special upscale handling is needed.
+function scaleRGBA(src, srcW, srcH, dstW, dstH) {
+  const out = Buffer.alloc(dstW * dstH * 4);
+  // Map dst pixel centers back into src space.
+  const xRatio = srcW / dstW;
+  const yRatio = srcH / dstH;
+  for (let dy = 0; dy < dstH; dy++) {
+    const sy = (dy + 0.5) * yRatio - 0.5;
+    let y0 = Math.floor(sy);
+    const wy = sy - y0;
+    if (y0 < 0) y0 = 0;
+    const y1 = Math.min(y0 + 1, srcH - 1);
+    for (let dx = 0; dx < dstW; dx++) {
+      const sx = (dx + 0.5) * xRatio - 0.5;
+      let x0 = Math.floor(sx);
+      const wx = sx - x0;
+      if (x0 < 0) x0 = 0;
+      const x1 = Math.min(x0 + 1, srcW - 1);
+      const o = (dy * dstW + dx) * 4;
+      const i00 = (y0 * srcW + x0) * 4;
+      const i01 = (y0 * srcW + x1) * 4;
+      const i10 = (y1 * srcW + x0) * 4;
+      const i11 = (y1 * srcW + x1) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = src[i00 + c] * (1 - wx) + src[i01 + c] * wx;
+        const bot = src[i10 + c] * (1 - wx) + src[i11 + c] * wx;
+        out[o + c] = (top * (1 - wy) + bot * wy + 0.5) | 0;
+      }
+    }
+  }
+  return out;
 }
 
 // Real pixel downscale + JPEG re-encode. Decodes the base64 image, scales it so
@@ -69,12 +116,16 @@ export async function shrinkPixels(base64, opts = {}) {
   const maxBytes = opts.maxBytes ?? IMAGE_MAX_BYTES;
   const startQuality = opts.quality ?? IMAGE_JPEG_QUALITY;
   const MIN_JPEG_QUALITY = 60; // quality floor before we shrink dimensions further
-  const MIN_LONG_SIDE = 256;   // never downscale below this, even if still over budget
+  // Dimension floor for the byte-convergence loop. The vendored jpeg-js encoder
+  // produces larger output than jimp's for incompressible content, so allow the
+  // long side to shrink further than jimp needed (128 vs the old 256) to still
+  // meet a tight byte budget for near-random images. Real screenshots compress
+  // well and rarely reach this floor.
+  const MIN_LONG_SIDE = 128;
 
   try {
-    const Jimp = await loadJimp();
     const buf = Buffer.from(base64, 'base64');
-    const original = await Jimp.read(buf);
+    const original = decodePixels(buf); // { width, height, data:RGBA }
     const srcW = original.width;
     const srcH = original.height;
     if (!srcW || !srcH) return { ok: false, error: 'decoded image has no dimensions' };
@@ -82,16 +133,19 @@ export async function shrinkPixels(base64, opts = {}) {
     let curLong = Math.min(maxLongSide, Math.max(srcW, srcH));
     let outBase64 = '';
     for (;;) {
-      // Clone from the full-res original each pass so repeated downscales never
+      // Scale from the full-res original each pass so repeated downscales never
       // compound quality loss.
-      const work = original.clone();
+      let w = srcW, h = srcH, data = original.data;
       if (Math.max(srcW, srcH) > curLong) {
-        work.scaleToFit({ w: curLong, h: curLong });
+        const scale = curLong / Math.max(srcW, srcH);
+        w = Math.max(1, Math.round(srcW * scale));
+        h = Math.max(1, Math.round(srcH * scale));
+        data = scaleRGBA(original.data, srcW, srcH, w, h);
       }
       let quality = startQuality;
       for (;;) {
-        const jpgBuf = await work.getBuffer('image/jpeg', { quality });
-        outBase64 = jpgBuf.toString('base64');
+        const jpg = jpegEncode({ data, width: w, height: h }, quality);
+        outBase64 = jpg.data.toString('base64');
         if (outBase64.length <= maxBytes || quality <= MIN_JPEG_QUALITY) break;
         quality = Math.max(MIN_JPEG_QUALITY, quality - 10);
       }

@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { Jimp } from 'jimp';
 import {
   detectImageFormat,
   readImageDimensions,
@@ -8,6 +7,15 @@ import {
   shrinkPixels,
   extractImages,
 } from '../src/image.js';
+import jpegDecode from '../src/vendor/jpeg-js/decoder.js';
+import { decodePng } from '../src/vendor/png.js';
+import { solidPngBase64, noisyPngBase64 } from './helpers/png-encode.mjs';
+
+// Decode a JPEG base64 (production always re-encodes to JPEG) to {width,height}.
+function decodeJpegDims(base64) {
+  const img = jpegDecode(Buffer.from(base64, 'base64'), { useTArray: true });
+  return { width: img.width, height: img.height };
+}
 
 // ---------------------------------------------------------------------------
 // Minimal header byte builders. We only need the bytes the header parsers read;
@@ -215,41 +223,31 @@ describe('extractImages contract preservation', () => {
 
 // ---------------------------------------------------------------------------
 // Real-pixel tests. Unlike the header-only fixtures above, these build genuine
-// decodable images with jimp so the actual downscale + JPEG re-encode path runs
-// end to end (no network, no accounts).
+// decodable images with the pure-Node PNG encoder helper so the actual downscale
+// + JPEG re-encode path (vendored zero-dep codecs) runs end to end (no network,
+// no accounts, no npm deps).
 // ---------------------------------------------------------------------------
 
 // Solid-color image — compresses to almost nothing as JPEG (used for dimension
-// tests where byte size is irrelevant).
-async function realPng(width, height, color = 0xff0000ff) {
-  const img = new Jimp({ width, height, color });
-  const buf = await img.getBuffer('image/png');
-  return buf.toString('base64');
+// tests where byte size is irrelevant). Pure-Node PNG builder, no deps.
+async function realPng(width, height) {
+  return solidPngBase64(width, height, [255, 0, 0, 255]);
 }
 
 // Random-noise image — does NOT compress, so JPEG byte size stays large. Used to
-// exercise the two-stage byte-convergence loop.
+// exercise the two-stage byte-convergence loop. Deterministic (seeded) so the
+// test is reproducible.
 async function noisyPng(width, height) {
-  const img = new Jimp({ width, height });
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const r = (Math.random() * 256) | 0;
-      const g = (Math.random() * 256) | 0;
-      const b = (Math.random() * 256) | 0;
-      img.setPixelColor(((r << 24) | (g << 16) | (b << 8) | 0xff) >>> 0, x, y);
-    }
-  }
-  const buf = await img.getBuffer('image/png');
-  return buf.toString('base64');
+  return noisyPngBase64(width, height, (width * 31 + height) >>> 0);
 }
 
-describe('shrinkPixels (real jimp decode + re-encode)', () => {
+describe('shrinkPixels (real vendored decode + re-encode)', () => {
   it('downscales an oversized-dimension image so the long side fits the cap', async () => {
     const png = await realPng(2400, 600);
     const r = await shrinkPixels(png, { maxLongSide: 1568, maxBytes: 400000 });
     assert.equal(r.ok, true);
     assert.equal(r.mime_type, 'image/jpeg');
-    const decoded = await Jimp.read(Buffer.from(r.base64_data, 'base64'));
+    const decoded = decodeJpegDims(r.base64_data);
     assert.ok(Math.max(decoded.width, decoded.height) <= 1568,
       `long side ${Math.max(decoded.width, decoded.height)} should be <= 1568`);
     // Aspect ratio (4:1) preserved within rounding.
@@ -268,6 +266,34 @@ describe('shrinkPixels (real jimp decode + re-encode)', () => {
 
   it('returns ok:false on undecodable data (caller keeps original)', async () => {
     const r = await shrinkPixels(Buffer.from('not a real image').toString('base64'));
+    assert.equal(r.ok, false);
+    assert.ok(r.error);
+  });
+
+  it('returns ok:false for a format the vendored codecs do not support (WebP)', async () => {
+    // WebP is intentionally out of scope for the zero-dep re-encoder; it must
+    // degrade to ok:false so maybeShrinkImage forwards the original untouched
+    // rather than throwing.
+    const riff = Buffer.alloc(64);
+    riff.write('RIFF', 0, 'ascii');
+    riff.writeUInt32LE(56, 4);
+    riff.write('WEBP', 8, 'ascii');
+    riff.write('VP8 ', 12, 'ascii');
+    const r = await shrinkPixels(riff.toString('base64'));
+    assert.equal(r.ok, false);
+    assert.match(r.error, /unsupported image format/);
+  });
+
+  it('rejects an interlaced/16-bit PNG variant via ok:false (safe passthrough)', async () => {
+    // Craft a PNG whose IHDR claims 16-bit depth — the decoder must throw, which
+    // shrinkPixels turns into ok:false rather than a crash or a bad image.
+    const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const ihdrData = Buffer.alloc(13);
+    ihdrData.writeUInt32BE(32, 0); ihdrData.writeUInt32BE(32, 4);
+    ihdrData[8] = 16; ihdrData[9] = 6; // 16-bit RGBA -> unsupported
+    const lenBuf = Buffer.alloc(4); lenBuf.writeUInt32BE(13, 0);
+    const png = Buffer.concat([sig, lenBuf, Buffer.from('IHDR'), ihdrData, Buffer.alloc(4)]);
+    const r = await shrinkPixels(png.toString('base64'));
     assert.equal(r.ok, false);
     assert.ok(r.error);
   });
@@ -294,7 +320,7 @@ describe('maybeShrinkImage real re-encode wiring', () => {
     assert.equal(r.dropped, false);
     assert.equal(r.resized, true);
     assert.equal(r.mime_type, 'image/jpeg');
-    const decoded = await Jimp.read(Buffer.from(r.base64_data, 'base64'));
+    const decoded = decodeJpegDims(r.base64_data);
     assert.ok(Math.max(decoded.width, decoded.height) <= 1568);
   });
 
@@ -328,7 +354,7 @@ describe('maybeShrinkImage real re-encode wiring', () => {
     assert.equal(out.images.length, 1);
     assert.deepEqual(Object.keys(out.images[0]).sort(), ['base64_data', 'mime_type']);
     assert.equal(out.images[0].mime_type, 'image/jpeg'); // re-encoded
-    const decoded = await Jimp.read(Buffer.from(out.images[0].base64_data, 'base64'));
+    const decoded = decodeJpegDims(out.images[0].base64_data);
     assert.ok(Math.max(decoded.width, decoded.height) <= 1568);
   });
 });

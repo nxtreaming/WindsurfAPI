@@ -1,7 +1,7 @@
 {
   "name": "windsurf-api",
   "version": "2.0.145",
-  "description": "Windsurf/Devin to OpenAI + Anthropic + Gemini compatible API proxy. Turns Devin's 100+ AI models (Claude, GPT, Gemini, DeepSeek, Grok, Qwen, Kimi, GLM, SWE) into multi-protocol API endpoints. Single runtime dependency (jimp, for image downscaling).",
+  "description": "Windsurf/Devin to OpenAI + Anthropic + Gemini compatible API proxy. Turns Devin's 100+ AI models (Claude, GPT, Gemini, DeepSeek, Grok, Qwen, Kimi, GLM, SWE) into multi-protocol API endpoints. Zero npm runtime dependencies (image codecs vendored under src/vendor).",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -46,8 +46,5 @@
     "api-proxy",
     "llm-gateway",
     "reverse-engineering"
-  ],
-  "dependencies": {
-    "jimp": "1.6.1"
-  }
+  ]
 }
