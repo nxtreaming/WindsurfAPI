@@ -75,3 +75,9 @@ PR-FLOW.md
 *-session.env
 ghidra-proj/
 .ghidra-corpus/
+# AI session transcripts / context dumps — contain account credentials, session
+# tokens and proxy strings verbatim from the conversation; never commit
+*claudetxt.txt
+没跑完的上下文.txt
+*-context-dump.txt
+上下文*.txt
