@@ -153,7 +153,9 @@ export async function toChatCompletion(params, { id = newId(), created = nowSeco
  * lifecycle (heartbeat, unregister, res.end) exactly as the Cascade path does.
  *
  * Emission order mirrors the Cascade stream:
- *   1. role-priming chunk (delta {role, content:''})
+ *   1. role-priming chunk (delta {role, content:''}) — DEFERRED until the first
+ *      real delta (or the finish tail) so a pre-open transient/dead-token error
+ *      leaves the caller's first-connect recovery armed (see `prime` below)
  *   2. reasoning_content deltas as they arrive
  *   3. content deltas as they arrive
  *   4. finish chunk (delta {}, finish_reason)
@@ -166,9 +168,25 @@ export async function streamChatCompletion(params, send, { id = newId(), created
   const model = displayModel || params.model;
   const base = { id, object: OBJECT_CHUNK, created, model, system_fingerprint: systemFingerprint(model) };
 
-  // 1. Prime the stream with the assistant role so clients open the message
-  //    even before any token arrives.
-  send({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
+  // 1. Role-priming chunk. This USED to fire eagerly here, before streamChat
+  //    opened the upstream — but the very first send() flips `emitted=true` in
+  //    the caller (handlers/chat.js), which disarms every !emitted-gated
+  //    first-connect recovery branch (transient replay / re-login / failover).
+  //    A transient 5xx/reset or a dead token — which the non-stream path retries
+  //    / re-logs-in / fails over — then surfaced as a hard client error on the
+  //    stream path. So we DEFER the prime behind `primed` until the first REAL
+  //    delta (content / reasoning / tool_call) actually arrives, i.e. until the
+  //    upstream has demonstrably opened. The empty / immediate-finish path primes
+  //    from the finish tail below, so a legitimately empty response is still a
+  //    well-formed OpenAI stream (role → finish → optional usage). Operators who
+  //    relied on the eager role chunk can restore it with DEVIN_CONNECT_EAGER_PRIME=1.
+  let primed = false;
+  const prime = () => {
+    if (primed) return;
+    primed = true;
+    send({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });
+  };
+  if (String(process.env.DEVIN_CONNECT_EAGER_PRIME || '') === '1') prime();
 
   let content = '';
   let reasoning = '';
@@ -189,6 +207,7 @@ export async function streamChatCompletion(params, send, { id = newId(), created
   const collectedToolCalls = [];
   const emitToolCalls = (calls) => {
     for (const tc of calls || []) {
+      prime(); // a tool_call is a real delta — open the message before it
       const idx = collectedToolCalls.length;
       collectedToolCalls.push(tc);
       send({ ...base, choices: [{ index: 0, delta: {
@@ -204,9 +223,11 @@ export async function streamChatCompletion(params, send, { id = newId(), created
 
   for await (const ev of streamChatImpl(params)) {
     if (ev.type === 'reasoning') {
+      prime(); // first real delta: emit the deferred role chunk first
       reasoning += ev.text;
       send({ ...base, choices: [{ index: 0, delta: { reasoning_content: ev.text }, finish_reason: null }] });
     } else if (ev.type === 'content') {
+      prime(); // first real delta: emit the deferred role chunk first
       content += ev.text;
       if (toolParser) {
         const { text, toolCalls } = toolParser.feed(ev.text);
@@ -242,7 +263,13 @@ export async function streamChatCompletion(params, send, { id = newId(), created
     finishReason = 'tool_calls';
   }
 
-  // 4. Terminal finish chunk.
+  // 4. Terminal finish chunk. Reaching here means streamChat drained cleanly
+  //    (the upstream opened and completed); if it had thrown before any delta,
+  //    the exception would have propagated with `primed` — and therefore the
+  //    caller's `emitted` — still false, leaving first-connect recovery armed.
+  //    An empty / immediate-finish response yielded no delta to prime from, so
+  //    prime here to keep the stream well-formed: role → finish → optional usage.
+  prime();
   send({ ...base, choices: [{ index: 0, delta: {}, finish_reason: finishReason }] });
 
   // 5. Usage-only chunk (OpenAI streams usage in a trailing choices:[] frame).

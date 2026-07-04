@@ -2181,6 +2181,25 @@ async function _handleChatCompletionsInner(body, context = {}) {
           'X-Accel-Buffering': 'no',
         },
         handler: async (res) => {
+          // Client-disconnect wiring — mirror the Cascade stream path
+          // (streamResponse): a single handler-local AbortController is the
+          // one source of truth for teardown. res 'close' covers both the
+          // direct OpenAI route (real res) and the messages/gemini/responses
+          // routes (their translator fake-res fires 'close' on client
+          // disconnect via _clientDisconnected). context.signal chains in the
+          // server-level/graceful-shutdown abort threaded from the route.
+          const abortController = new AbortController();
+          let unregisterSse = () => {};
+          res.on('close', () => {
+            if (!res.writableEnded) {
+              log.info(`Chat[${reqId}]: DEVIN_CONNECT client disconnected mid-stream, aborting upstream`);
+              abortController.abort();
+            }
+          });
+          if (context.signal) {
+            if (context.signal.aborted) abortController.abort();
+            else context.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+          }
           let emitted = false;
           const fp = systemFingerprint(reqModelName);
           // O10: 仅直连 OpenAI 客户端(route==='chat')在出口归一化 error.type;
@@ -2199,6 +2218,35 @@ async function _handleChatCompletionsInner(body, context = {}) {
             }
             if (!res.writableEnded) { emitted = true; res.write(`data: ${JSON.stringify(data)}\n\n`); }
           };
+          // Point the upstream connect HTTP call at the handler-local controller
+          // (not the raw context.signal set at request setup) so a client
+          // disconnect — or the server-shutdown abort below — tears down the
+          // in-flight request instead of leaking it until the 120s timeout.
+          connectParams.signal = abortController.signal;
+          // Register with the SSE registry so graceful-shutdown drain can see
+          // this stream and abort it — same contract as the Cascade path. The
+          // finally below guarantees a matching unregister.
+          unregisterSse = registerSseController({
+            abort(reason) {
+              send(chatStreamError(reason || 'server shutting down', 'server_error', 'server_shutdown'));
+              if (!res.writableEnded) {
+                res.write('data: [DONE]\n\n');
+                res.end();
+              }
+              abortController.abort(reason);
+            },
+          });
+          // SSE heartbeat: keep the connection alive through any silent period
+          // (account acquisition, upstream "thinking", failover hops). `:`
+          // prefix is a comment line per the SSE spec — clients ignore it,
+          // intermediaries see bytes flowing, idle timers reset. Same
+          // HEARTBEAT_MS cadence as the Cascade path; the messages/gemini
+          // translators forward the raw comment (see createCaptureRes).
+          const heartbeat = setInterval(() => {
+            if (!res.writableEnded) res.write(': ping\n\n');
+          }, HEARTBEAT_MS);
+          const stopHeartbeat = () => clearInterval(heartbeat);
+          res.on('close', stopHeartbeat);
           // Run one account through the stream, with same-account re-login as the
           // first recovery step. Returns 'ok', 'dead' (token unrecoverable on this
           // account → caller may fail over), or 'error' (non-recoverable). Every
@@ -2266,39 +2314,60 @@ async function _handleChatCompletionsInner(body, context = {}) {
               return { kind: 'error', err };
             }
           };
-          let acct = ccAcct;
-          for (let hops = 0; ; hops++) {
-            if (acct) triedKeys.push(acct.apiKey);
-            const r = await attemptStream(acct);
-            if (r.kind === 'ok') break;
-            if (r.kind === 'error') {
-              // R1: account dry-well (QUOTA/RATE_LIMITED) → fail over to another
-              // pooled account instead of erroring the stream — but ONLY while
-              // !emitted, since replaying after bytes are on the wire would
-              // duplicate content. The offending account is already cooled.
-              if (isAccountFailoverError(r.err.code) && !emitted && hops < maxHops) {
-                const next = await acquireConnectFailover(triedKeys, context.signal, callerKey);
-                if (next) {
-                  log.info(`Chat[${reqId}]: DEVIN_CONNECT ${r.err.code} on account → stream failover hop ${hops + 1} to next pooled account`);
-                  bumpConnect('quota_failover_hops');
-                  acct = next;
-                  continue;
-                }
+          try {
+            let acct = ccAcct;
+            for (let hops = 0; ; hops++) {
+              // Client gone (disconnect or shutdown abort): stop before touching
+              // another pooled account. Without this the failover loop keeps
+              // hopping fresh accounts — burning quota and holding in-flight
+              // slots — to a socket that will never read the bytes. Checked at
+              // the top of every iteration so it gates each hop, not just the
+              // first attempt.
+              if (abortController.signal.aborted) {
+                log.info(`Chat[${reqId}]: DEVIN_CONNECT stream aborted (client gone) — stopping account failover`);
+                break;
               }
-              send(chatStreamError(r.err.message, 'upstream_error', r.err.code || null));
-              break;
+              if (acct) triedKeys.push(acct.apiKey);
+              const r = await attemptStream(acct);
+              if (r.kind === 'ok') break;
+              // Re-check after the (awaited) attempt: the client may have hung up
+              // while the upstream call was in flight. Bail before failing over.
+              if (abortController.signal.aborted) {
+                log.info(`Chat[${reqId}]: DEVIN_CONNECT stream aborted (client gone) — not failing over`);
+                break;
+              }
+              if (r.kind === 'error') {
+                // R1: account dry-well (QUOTA/RATE_LIMITED) → fail over to another
+                // pooled account instead of erroring the stream — but ONLY while
+                // !emitted, since replaying after bytes are on the wire would
+                // duplicate content. The offending account is already cooled.
+                if (isAccountFailoverError(r.err.code) && !emitted && hops < maxHops) {
+                  const next = await acquireConnectFailover(triedKeys, abortController.signal, callerKey);
+                  if (next) {
+                    log.info(`Chat[${reqId}]: DEVIN_CONNECT ${r.err.code} on account → stream failover hop ${hops + 1} to next pooled account`);
+                    bumpConnect('quota_failover_hops');
+                    acct = next;
+                    continue;
+                  }
+                }
+                send(chatStreamError(r.err.message, 'upstream_error', r.err.code || null));
+                break;
+              }
+              // r.kind === 'dead' — guaranteed !emitted, so a fresh account is safe.
+              if (acct) reportDeadToken(acct.apiKey);
+              bumpConnect('dead_tokens');
+              if (hops >= maxHops || emitted) { bumpConnect('failover_exhausted'); send(chatStreamError('all DEVIN_CONNECT accounts exhausted (dead session tokens)', 'upstream_error', 'UNAUTHORIZED')); break; }
+              const next = await acquireConnectFailover(triedKeys, abortController.signal, callerKey);
+              if (!next) { bumpConnect('failover_exhausted'); send(chatStreamError('all DEVIN_CONNECT accounts exhausted (dead session tokens)', 'upstream_error', 'UNAUTHORIZED')); break; }
+              log.info(`Chat[${reqId}]: DEVIN_CONNECT failover hop ${hops + 1} → next pooled account`);
+              bumpConnect('failover_hops');
+              acct = next;
             }
-            // r.kind === 'dead' — guaranteed !emitted, so a fresh account is safe.
-            if (acct) reportDeadToken(acct.apiKey);
-            bumpConnect('dead_tokens');
-            if (hops >= maxHops || emitted) { bumpConnect('failover_exhausted'); send(chatStreamError('all DEVIN_CONNECT accounts exhausted (dead session tokens)', 'upstream_error', 'UNAUTHORIZED')); break; }
-            const next = await acquireConnectFailover(triedKeys, context.signal, callerKey);
-            if (!next) { bumpConnect('failover_exhausted'); send(chatStreamError('all DEVIN_CONNECT accounts exhausted (dead session tokens)', 'upstream_error', 'UNAUTHORIZED')); break; }
-            log.info(`Chat[${reqId}]: DEVIN_CONNECT failover hop ${hops + 1} → next pooled account`);
-            bumpConnect('failover_hops');
-            acct = next;
+            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+          } finally {
+            unregisterSse();
+            stopHeartbeat();
           }
-          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
         },
       };
     }

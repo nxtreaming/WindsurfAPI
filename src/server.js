@@ -444,9 +444,19 @@ async function route(req, res) {
     const reqStartedAt = Date.now();
     const token = extractToken(req);
     const callerKey = callerKeyFromRequest(req, token, body);
+    // Thread a client-disconnect AbortSignal into the handler context so a
+    // caller that hangs up mid-flight tears down the in-flight upstream call
+    // and — on the DEVIN_CONNECT path — stops the failover loop from hopping
+    // fresh pooled accounts to a dead socket. The messages/gemini/responses
+    // routes drive their disconnect through their translator fake-res instead;
+    // this is the missing wiring on the direct OpenAI route. Guard on
+    // !writableEnded so the normal end-of-response 'close' is a no-op.
+    const abortController = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) abortController.abort(); });
     const result = await handleChatCompletions(body, {
       callerKey,
       nativeBridgeCallerKey: nativeBridgeCallerKeyForRequest(req, token, body, callerKey),
+      signal: abortController.signal,
     });
     const processingMs = Date.now() - reqStartedAt;
     const requestId = 'req_' + randomUUID();
