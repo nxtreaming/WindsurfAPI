@@ -26,6 +26,7 @@ import { handleMessages, handleCountTokens, validateMessagesRequest, validateCou
 import { handleGemini, parseGeminiPath } from './handlers/gemini.js';
 import { handleResponses } from './handlers/responses.js';
 import { handleModels } from './handlers/models.js';
+import { resolveModel, getModelInfo } from './models.js';
 import { handleDashboardApi, parseProxyUrl, validateProxyHost } from './dashboard/api.js';
 import { setAccountProxy } from './dashboard/proxy-config.js';
 import { config, log } from './config.js';
@@ -176,9 +177,20 @@ export function withRequestId(status, body, requestId) {
   return { ...body, request_id: requestId };
 }
 
+function anthropicModelPayload(id, info) {
+  return {
+    type: 'model',
+    id: info?.name || id,
+    display_name: info?.name || id,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+}
+
 async function route(req, res) {
   const { method } = req;
   let path = req.url.split('?')[0];
+  // Tolerate a doubled `/v1/v1/` prefix some clients emit.
+  if (path.startsWith('/v1/v1/')) path = path.slice(3);
 
   if (method === 'OPTIONS') {
     res.writeHead(204, {
@@ -420,6 +432,16 @@ async function route(req, res) {
 
   if (path === '/v1/models' && method === 'GET') {
     return json(res, 200, handleModels());
+  }
+
+  if (path.startsWith('/v1/models/') && method === 'GET') {
+    const rawId = decodeURIComponent(path.slice('/v1/models/'.length));
+    const modelKey = resolveModel(rawId);
+    const info = getModelInfo(modelKey);
+    if (!info) {
+      return json(res, 404, { type: 'error', error: { type: 'not_found_error', message: `Model ${rawId} not found` } });
+    }
+    return json(res, 200, anthropicModelPayload(rawId, info));
   }
 
   if (path === '/v1/chat/completions' && method === 'POST') {
