@@ -34,9 +34,17 @@ const SELECTOR_MAP = new Map(Object.entries({
   'subagent-default': 'subagent-default',
 
   // ── Anthropic (paid) ──
+  // opus-4-8 → -medium is frame-verified (see resolver header). The bare
+  // Cursor/OpenAI-style forms (no `claude-` prefix) exist in models.js's alias
+  // table, and chat.js passes the RAW request model name to resolveConnectSelector
+  // (not the models.js-resolved key), so without these entries a client asking
+  // for bare `opus-4-8` on the DEVIN_CONNECT path silently degrades to the free
+  // selector (issue #203). All point at the same frame-verified catalog selector.
   'claude-opus-4-8': 'claude-opus-4-8-medium',
   'claude-opus-4.8': 'claude-opus-4-8-medium',
   'claude-opus-4-8-medium': 'claude-opus-4-8-medium',
+  'opus-4-8': 'claude-opus-4-8-medium',
+  'opus-4.8': 'claude-opus-4-8-medium',
   'claude-sonnet-4-6': 'claude-sonnet-4-6-thinking',
   'claude-sonnet-4.6': 'claude-sonnet-4-6-thinking',
   'claude-sonnet-4-6-thinking': 'claude-sonnet-4-6-thinking',
