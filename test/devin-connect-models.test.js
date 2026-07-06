@@ -10,7 +10,10 @@ describe('resolveConnectSelector', () => {
 
   it('maps claude friendly names to their captured upstream selectors', () => {
     assert.equal(resolveConnectSelector('claude-opus-4.8').selector, 'claude-opus-4-8-medium');
-    assert.equal(resolveConnectSelector('claude-sonnet-4-6').selector, 'claude-sonnet-4-6-thinking');
+    // Dashed bare form is a real catalog selector (base model) → resolves to itself;
+    // the dotted family alias keeps the curated -thinking default.
+    assert.equal(resolveConnectSelector('claude-sonnet-4-6').selector, 'claude-sonnet-4-6');
+    assert.equal(resolveConnectSelector('claude-sonnet-4.6').selector, 'claude-sonnet-4-6-thinking');
     assert.equal(resolveConnectSelector('claude-sonnet-4.5').selector, 'MODEL_PRIVATE_2');
     assert.equal(resolveConnectSelector('claude-haiku-4-5').selector, 'MODEL_PRIVATE_11');
   });

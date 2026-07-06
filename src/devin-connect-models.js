@@ -45,7 +45,10 @@ const SELECTOR_MAP = new Map(Object.entries({
   'claude-opus-4-8-medium': 'claude-opus-4-8-medium',
   'opus-4-8': 'claude-opus-4-8-medium',
   'opus-4.8': 'claude-opus-4-8-medium',
-  'claude-sonnet-4-6': 'claude-sonnet-4-6-thinking',
+  // NB: bare dashed `claude-sonnet-4-6` is itself a real catalog selector now
+  // (the base, non-thinking model — reachable 2026-07-05), so it must resolve to
+  // ITSELF via the catalog fallthrough, not be remapped. Only the dotted family
+  // alias `claude-sonnet-4.6` carries the curated -thinking default.
   'claude-sonnet-4.6': 'claude-sonnet-4-6-thinking',
   'claude-sonnet-4-6-thinking': 'claude-sonnet-4-6-thinking',
   'claude-opus-4-5': 'MODEL_CLAUDE_4_5_OPUS',
@@ -90,6 +93,29 @@ const SELECTOR_MAP = new Map(Object.entries({
   'glm-5-2': 'glm-5-2',
   'glm-5.2': 'glm-5-2',
   'kimi-k2-7': 'kimi-k2-7',
+
+  // ── Paid roster confirmed reachable 2026-07-05 (teams token, direct-selector
+  // probe, .workflow-results/paid-live-2026-07-05/) ── each maps a catalog family
+  // alias to its -medium (or base/low) default; all targets are in the refreshed
+  // 105-model catalog snapshot. See RESULTS.md §2 for the reachability matrix.
+  'claude-5-fable': 'claude-5-fable-medium',
+  'claude-sonnet-5': 'claude-sonnet-5-medium',
+  'claude-opus-4-7': 'claude-opus-4-7-medium',
+  'claude-opus-4.7': 'claude-opus-4-7-medium',
+  'claude-opus-4.6': 'claude-opus-4-6',
+  'gpt-5-4': 'gpt-5-4-medium',
+  'gpt-5.4': 'gpt-5-4-medium',
+  'gpt-5-4-mini': 'gpt-5-4-mini-medium',
+  'gpt-5.4-mini': 'gpt-5-4-mini-medium',
+  'gpt-5-3-codex': 'gpt-5-3-codex-medium',
+  'gpt-5.3-codex': 'gpt-5-3-codex-medium',
+  'gemini-3-5-flash': 'gemini-3-5-flash-medium',
+  'gemini-3.5-flash': 'gemini-3-5-flash-medium',
+  'gemini-3-1-pro': 'gemini-3-1-pro-low',
+  'gemini-3.1-pro': 'gemini-3-1-pro-low',
+  'glm-5.1': 'glm-5-1',
+  'kimi-k2.6': 'kimi-k2-6',
+  'kimi-k2.7': 'kimi-k2-7',
 }));
 
 // The set of selectors the live catalog actually exposes (committed snapshot,
