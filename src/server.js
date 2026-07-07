@@ -135,7 +135,17 @@ export function extractToken(req) {
     if (first) return first;
   }
   const xApiKey = req.headers['x-api-key'] || '';
-  return xApiKey;
+  if (xApiKey) return xApiKey;
+  // Gemini-native auth: the Google GenAI SDK sends the key as `x-goog-api-key`
+  // or a `?key=` query param, not Bearer/x-api-key. Accept both so real Gemini
+  // clients can hit /v1beta/models/*:generateContent without a custom header.
+  const xGoog = String(req.headers['x-goog-api-key'] || '').trim();
+  if (xGoog) return xGoog;
+  try {
+    const qKey = new URL(req.url, 'http://localhost').searchParams.get('key');
+    if (qKey) return qKey.trim();
+  } catch { /* malformed url → no query key */ }
+  return '';
 }
 
 function nativeBridgeCallerKeyForRequest(req, token, body, callerKey = '') {
