@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ToolCallStreamParser,
   normalizeMessagesForCascade,
+  stripOrphanedToolResults,
 } from '../src/handlers/tool-emulation.js';
 
 // ---------------------------------------------------------------------------
@@ -164,5 +165,60 @@ describe('injectUserPreamble switch (native double-send guard)', () => {
     const joined = out.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
     // The tool must NOT be described in prose — it rides natively in protobuf #10 instead.
     assert.ok(!/get_weather/.test(joined), 'preamble must be suppressed so tools are not double-sent');
+  });
+});
+
+describe('stripOrphanedToolResults', () => {
+  it('drops a tool_result whose id matches no prior tool_call', () => {
+    const out = stripOrphanedToolResults([
+      { role: 'user', content: 'hi' },
+      { role: 'tool', tool_call_id: 'ghost', content: 'x' },
+    ]);
+    assert.deepEqual(out.map(m => m.role), ['user']);
+  });
+  it('keeps a tool_result paired to a real assistant tool_call', () => {
+    const msgs = [
+      { role: 'assistant', tool_calls: [{ id: 'c1', function: { name: 'f' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+    ];
+    assert.equal(stripOrphanedToolResults(msgs).length, 2);
+  });
+  it('empty issued set → every tool_result is an orphan and is dropped', () => {
+    const out = stripOrphanedToolResults([
+      { role: 'user', content: 'hi' },
+      { role: 'tool', tool_call_id: 'x', content: 'y' },
+    ]);
+    assert.ok(!out.some(m => m.role === 'tool'));
+  });
+  it('mixed: keeps the paired result, drops the orphan', () => {
+    const out = stripOrphanedToolResults([
+      { role: 'assistant', tool_calls: [{ id: 'c1', function: { name: 'f' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+      { role: 'tool', tool_call_id: 'ghost', content: 'y' },
+    ]);
+    assert.deepEqual(out.filter(m => m.role === 'tool').map(m => m.tool_call_id), ['c1']);
+  });
+  it('never drops assistant tool_calls (pending calls awaiting results are kept)', () => {
+    const msgs = [{ role: 'assistant', tool_calls: [{ id: 'pending', function: { name: 'f' } }] }];
+    assert.equal(stripOrphanedToolResults(msgs).length, 1);
+  });
+  it('returns the same array (no copy) when nothing is dropped', () => {
+    const msgs = [{ role: 'user', content: 'hi' }];
+    assert.equal(stripOrphanedToolResults(msgs), msgs);
+  });
+  it('is OFF by default in normalizeMessagesForCascade (orphan survives)', () => {
+    const out = normalizeMessagesForCascade(
+      [{ role: 'user', content: 'hi' }, { role: 'tool', tool_call_id: 'ghost', content: 'x' }],
+      [], { route: 'devin_connect' },
+    );
+    // orphan tool_result is converted to a <tool_result> user message, not dropped
+    assert.ok(out.some(m => typeof m.content === 'string' && m.content.includes('tool_result')));
+  });
+  it('stripOrphans:true removes the orphan before conversion', () => {
+    const out = normalizeMessagesForCascade(
+      [{ role: 'user', content: 'hi' }, { role: 'tool', tool_call_id: 'ghost', content: 'x' }],
+      [], { route: 'devin_connect', stripOrphans: true },
+    );
+    assert.ok(!out.some(m => typeof m.content === 'string' && m.content.includes('tool_result')));
   });
 });

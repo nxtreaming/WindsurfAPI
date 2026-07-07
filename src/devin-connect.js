@@ -468,6 +468,41 @@ export function getToolDefTags(env = process.env) {
  * defer_loading are Devin-proprietary and never emitted (getToolDefTags rejects
  * their keys).
  */
+// Normalize an OpenAI/MCP function-parameters JSON Schema into the minimal,
+// well-formed shape upstream accepts. Real clients (OpenCode, MCP servers) emit
+// schemas with missing/loose fields or proprietary keys ($schema, unevaluated
+// keywords) that a strict upstream can reject (→ UPSTREAM_INTERNAL). Portable
+// hardening (kiro's normalize_json_schema, repo-hank9999): guarantee an object
+// schema with a `properties` object and a string[] `required`, and DROP keys the
+// upstream doesn't want ($schema). Non-destructive to the caller's real schema
+// content — only fixes the envelope. Returns a plain object safe to JSON.stringify.
+export function normalizeToolSchema(schema) {
+  // Non-object / missing schema → the canonical empty object schema.
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return { type: 'object', properties: {} };
+  }
+  const out = { ...schema };
+  // $schema is a meta key some clients add; upstream schemas never carry it.
+  delete out.$schema;
+  // Force an object schema (function parameters are always an object).
+  if (out.type !== 'object') out.type = 'object';
+  // properties must be an object (not array/null/absent).
+  if (!out.properties || typeof out.properties !== 'object' || Array.isArray(out.properties)) {
+    out.properties = {};
+  }
+  // required must be a string[] naming only real properties; drop anything else.
+  if (out.required !== undefined) {
+    if (!Array.isArray(out.required)) {
+      delete out.required;
+    } else {
+      const keys = new Set(Object.keys(out.properties));
+      const req = out.required.filter((r) => typeof r === 'string' && keys.has(r));
+      if (req.length) out.required = req; else delete out.required;
+    }
+  }
+  return out;
+}
+
 function encodeToolDef(tool, tags) {
   const fn = tool?.function || {};
   const fields = [];
@@ -475,7 +510,9 @@ function encodeToolDef(tool, tags) {
   if (fn.description) fields.push(writeStringField(tags.description, String(fn.description)));
   if (fn.parameters !== undefined) {
     // SWITCH POINT (see header): string today; writeBytesField if RE/capture proves bytes.
-    fields.push(writeStringField(tags.parameters, JSON.stringify(fn.parameters)));
+    // Normalize the schema envelope first so a malformed client/MCP schema can't
+    // corrupt the ToolDef and trip a strict upstream decode.
+    fields.push(writeStringField(tags.parameters, JSON.stringify(normalizeToolSchema(fn.parameters))));
   }
   if (tags.strict && fn.strict === true) {
     fields.push(writeVarintField(tags.strict, 1));

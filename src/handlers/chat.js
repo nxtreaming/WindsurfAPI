@@ -2111,7 +2111,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
     const suppressPreamble = soloProbe || (nativeDefsOn && nativeCallsOn);
     if (soloProbe) log.info(`Chat[${reqId}]: DEVIN_CONNECT TOOL_DEF SOLO probe — preamble suppressed, native #10 is the only tool signal`);
     const connectMessages = emulateTools
-      ? normalizeMessagesForCascade(messages, effectiveTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble })
+      ? normalizeMessagesForCascade(messages, effectiveTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble, stripOrphans: nativeDefsOn })
       : messages;
     log.info(`Chat[${reqId}]: DEVIN_CONNECT ${reqModelName} -> selector=${selector}${mapped ? '' : ' [unmapped→free-tier]'} stream=${!!stream}${emulateTools ? ` tools=${effectiveTools.length}` : ''}`);
     const ccId = genId();

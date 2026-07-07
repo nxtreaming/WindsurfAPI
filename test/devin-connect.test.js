@@ -13,6 +13,7 @@ import {
   getToolDefTags,
   extractInlineImages,
   expandVisionMessage,
+  normalizeToolSchema,
   __setRequestImpl,
   __testing,
   mergeToolCallFragment,
@@ -1430,5 +1431,46 @@ describe('buildGetChatMessageRequest — vision (gated)', () => {
     });
     const readDefs = topToolDefs(proto).filter(s => getField(s, 1, 2)?.value.toString('utf8') === 'read');
     assert.equal(readDefs.length, 1, 'exactly one read ToolDef (native wins, synthetic skipped)');
+  });
+});
+
+describe('normalizeToolSchema', () => {
+  it('coerces null/non-object/array to the canonical empty object schema', () => {
+    assert.deepEqual(normalizeToolSchema(null), { type: 'object', properties: {} });
+    assert.deepEqual(normalizeToolSchema(undefined), { type: 'object', properties: {} });
+    assert.deepEqual(normalizeToolSchema('x'), { type: 'object', properties: {} });
+    assert.deepEqual(normalizeToolSchema([1, 2]), { type: 'object', properties: {} });
+  });
+  it('forces type=object and an object properties', () => {
+    const r = normalizeToolSchema({ type: 'string' });
+    assert.equal(r.type, 'object');
+    assert.deepEqual(r.properties, {});
+    const r2 = normalizeToolSchema({ properties: 'nope' });
+    assert.deepEqual(r2.properties, {});
+  });
+  it('drops $schema meta key', () => {
+    const r = normalizeToolSchema({ $schema: 'http://json-schema.org', type: 'object', properties: { a: { type: 'string' } } });
+    assert.equal(r.$schema, undefined);
+    assert.deepEqual(r.properties, { a: { type: 'string' } });
+  });
+  it('required: keeps only string names that are real properties', () => {
+    const r = normalizeToolSchema({ type: 'object', properties: { a: {}, b: {} }, required: ['a', 'ghost', 42, 'b'] });
+    assert.deepEqual(r.required, ['a', 'b']);
+  });
+  it('required: non-array is dropped; empty-after-filter is dropped', () => {
+    assert.equal(normalizeToolSchema({ type: 'object', properties: {}, required: 'a' }).required, undefined);
+    assert.equal(normalizeToolSchema({ type: 'object', properties: { a: {} }, required: ['ghost'] }).required, undefined);
+  });
+  it('preserves real schema content (properties, descriptions, nested)', () => {
+    const src = { type: 'object', properties: { path: { type: 'string', description: 'file path' }, n: { type: 'integer' } }, required: ['path'] };
+    const r = normalizeToolSchema(src);
+    assert.deepEqual(r.properties, src.properties);
+    assert.deepEqual(r.required, ['path']);
+  });
+  it('does not mutate the caller object', () => {
+    const src = { $schema: 'x', type: 'string', properties: {} };
+    normalizeToolSchema(src);
+    assert.equal(src.$schema, 'x');
+    assert.equal(src.type, 'string');
   });
 });

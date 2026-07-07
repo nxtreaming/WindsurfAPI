@@ -74,6 +74,19 @@ const WORKSPACE_STUB_OVERRIDE = 'Any `<workspace_information>` or `<workspace_la
  * This version is for user-message injection (legacy fallback).
  * Prefer buildToolPreambleForProto() for system-prompt-level injection.
  */
+// Weak models (claude-5-fable-*) mis-read the standard tool preamble's trailing
+// "…answer directly in plain text. After the last call, stop generating;" — the
+// "stop generating" clause dominates and, for a plain non-tool prompt like "你好",
+// the model degenerates to an immediate EOS with EMPTY content (VERIFIED by
+// offline replay of oc-capture req-003: fable-5-medium + 11 tools + a 9KB client
+// system → finish=stop, completion_tokens=1, empty). It is NOT a size problem
+// (the injected preamble was only ~706B); it is an instruction-logic problem.
+// For these models we re-order the closing so the anti-empty directive is LAST
+// and unmistakable, and drop the "stop generating" phrasing that misleads them.
+export function isWeakEmulationModel(modelKey = '') {
+  return /^claude-5-fable(?:[-.]|$)/i.test(String(modelKey || ''));
+}
+
 export function buildToolPreamble(tools, toolChoice = 'auto', modelKey = null, provider = null, route = null) {
   if (!Array.isArray(tools) || tools.length === 0) return '';
   const dialect = pickToolDialect(modelKey, provider, route);
@@ -131,6 +144,15 @@ export function buildToolPreamble(tools, toolChoice = 'auto', modelKey = null, p
     choiceClause = ` You MUST call at least one of these functions this turn — do not answer in plain text.`;
   } else if (mode === 'none') {
     choiceClause = ` Do NOT call any function this turn — answer the user directly in plain text.`;
+  }
+  // Weak models: put the anti-empty directive LAST and drop the "stop generating"
+  // phrasing they misread into an immediate EOS. The final clause is the highest-
+  // salience instruction, so ending on "if no tool is needed, answer in plain text"
+  // keeps fable from degenerating to empty on a plain prompt.
+  if (isWeakEmulationModel(modelKey)) {
+    const emitLine = `To use a tool, emit a single-line block: ${emit}.`;
+    const hintLine = hints.length ? ' ' + hints.join(' ') : '';
+    return `Tools available this turn: ${names.join(', ')}. ${emitLine}${antiRefusal ? ' ' + antiRefusal : ''}${choiceClause}${hintLine} ${WORKSPACE_PATH_HINT} IMPORTANT: if the user's message does not require a tool, just reply normally in plain text — never reply empty. Only use a tool when it is actually needed.`;
   }
   return `Tools available this turn: ${names.join(', ')}. To call one, emit a single-line block: ${emit}.${antiRefusal ? ' ' + antiRefusal : ''}${choiceClause} ${hints.join(' ')} ${WORKSPACE_PATH_HINT} Otherwise answer directly in plain text. After the last call, stop generating; the caller returns results in the next turn as <tool_result tool_call_id="...">...</tool_result>.`;
 }
@@ -765,8 +787,54 @@ function neutralizeToolResultBody(text) {
   return out;
 }
 
+// Drop orphaned tool_result messages — a role:'tool' whose tool_call_id does not
+// match any assistant tool_call earlier in the conversation. Portable hardening
+// (kiro's remove_orphaned_tool_uses, repo-hank9999): a tool_result with no parent
+// tool_call is a malformed turn a strict upstream can reject (→ UPSTREAM_INTERNAL),
+// and OpenCode/agent loops occasionally emit them (truncated history, retries).
+//
+// CONSERVATIVE by design: we only remove tool_result orphans (an unmistakable
+// error — a result for a call that was never made). We do NOT drop assistant
+// tool_calls that lack a following tool_result: the last turn legitimately has a
+// pending call awaiting execution, so dropping it would break active agent loops.
+// A tool_result whose id matches a real prior call is always kept.
+export function stripOrphanedToolResults(messages) {
+  if (!Array.isArray(messages)) return messages;
+  // Collect every tool_call id the assistant actually issued.
+  const issued = new Set();
+  for (const m of messages) {
+    if (m?.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        const id = tc?.id;
+        if (id) issued.add(String(id));
+      }
+    }
+  }
+  // Note: an empty `issued` set is NOT a reason to skip — it means EVERY
+  // tool_result present is an orphan (a result with no call anywhere), which is
+  // exactly the malformed shape to drop.
+  let dropped = 0;
+  const out = messages.filter((m) => {
+    if (m?.role === 'tool') {
+      const id = m.tool_call_id != null ? String(m.tool_call_id) : '';
+      if (!id || !issued.has(id)) { dropped++; return false; }
+    }
+    return true;
+  });
+  if (dropped) log?.info?.(`tool-pairing: dropped ${dropped} orphaned tool_result(s)`);
+  return dropped ? out : messages;
+}
+
 export function normalizeMessagesForCascade(messages, tools, options = {}) {
   if (!Array.isArray(messages)) return messages;
+  // Orphan-stripping is OPT-IN (options.stripOrphans) — NOT the default. Doing it
+  // unconditionally would gut a legitimate continuation that carries a
+  // tool_result whose parent tool_call lived in an earlier, client-truncated
+  // turn, and would also strip standalone tool_result messages that the
+  // content-neutralization path is meant to sanitize. Callers on the native-tool
+  // path (where a self-consistent turn matters to a strict upstream) pass
+  // stripOrphans:true explicitly.
+  if (options.stripOrphans) messages = stripOrphanedToolResults(messages);
   const injectUserPreamble = options.injectUserPreamble !== false;
   const modelKey = options.modelKey || null;
   const provider = options.provider || null;
