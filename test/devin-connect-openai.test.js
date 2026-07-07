@@ -498,6 +498,23 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
     assert.equal(body.choices[0].message.content, 'real answer');
   });
 
+  // REGRESSION (live paid probe 2026-07-08): genuine fable empties came back with
+  // completion_tokens of 3/5/8/9, NOT <=2. An earlier `ct <= 2` gate vetoed the
+  // retry on every one (15/15 empty, zero heals in production). The empty OUTPUT
+  // is the signature, not the token count.
+  it('retries an empty completion even when completion_tokens > 2 (no ct gate)', async () => {
+    process.env.DEVIN_CONNECT_RETRY_ON_EMPTY_MS = '0';
+    let calls = 0;
+    __setStreamChatForTest(async function* () {
+      calls++;
+      if (calls === 1) yield { type: 'finish', reason: 'stop', usage: { prompt_tokens: 8, completion_tokens: 9, total_tokens: 17 } };
+      else for (const ev of REAL) yield ev;
+    });
+    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    assert.equal(calls, 2, 'ct=9 empty is still healed');
+    assert.equal(body.choices[0].message.content, 'real answer');
+  });
+
   it('stream: retries an empty completion without emitting a premature role/finish frame', async () => {
     process.env.DEVIN_CONNECT_RETRY_ON_EMPTY_MS = '0';
     let calls = 0;

@@ -71,6 +71,10 @@ function retryOnEmptyBaseMs(env = process.env) {
  * @param {boolean} sawContent  true if any non-empty content/reasoning delta arrived
  */
 function isEmptyCompletion(finishEv, sawContent) {
+  // The AUTHORITATIVE signal is that the turn produced ZERO usable output:
+  // no content delta, no reasoning delta, no tool call. `sawContent` already
+  // captures "any non-empty content/reasoning arrived", so if it's true the
+  // turn is not empty. This is what actually breaks OpenCode/agent loops.
   if (sawContent || !finishEv) return false;
   // A native/emulated tool call is a real answer even with no visible text.
   if (finishEv.toolCalls && finishEv.toolCalls.length) return false;
@@ -78,10 +82,12 @@ function isEmptyCompletion(finishEv, sawContent) {
   // signal) counts. 'length' / 'tool_calls' / 'content_filter' are real
   // terminal states we must not paper over with a retry.
   if (finishEv.reason != null && finishEv.reason !== 'stop') return false;
-  // completion_tokens ≤ 2 is the observed footprint. It is absent on the free
-  // tier / un-calibrated usage — in that case "no content seen" alone qualifies.
-  const ct = finishEv.usage?.completion_tokens;
-  if (ct != null && ct > 2) return false;
+  // NOTE: completion_tokens is deliberately NOT used as a gate. Live paid probes
+  // (2026-07-08, fable-5-medium + 11–14 tools) showed genuine empty replies with
+  // completion_tokens of 3/5/8/9 — an earlier `ct <= 2` gate silently vetoed the
+  // retry on every one of them (15/15 empty, zero heals). The empty OUTPUT
+  // (sawContent === false with a clean stop) is the real signature; ct only rides
+  // the log line below for diagnostics.
   return true;
 }
 
