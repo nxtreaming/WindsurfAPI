@@ -61,6 +61,10 @@
     "restart": "重启",
     "updateAndRestart": "更新并重启"
   },
+  "aria": {
+    "increment": "增加",
+    "decrement": "减少"
+  },
   "action": {
     "checkUpdate": "检查更新",
     "applyUpdate": "一键更新并重启",

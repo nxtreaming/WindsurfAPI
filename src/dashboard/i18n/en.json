@@ -61,6 +61,10 @@
     "restart": "Restart",
     "updateAndRestart": "Update and Restart"
   },
+  "aria": {
+    "increment": "Increment",
+    "decrement": "Decrement"
+  },
   "action": {
     "checkUpdate": "Check Update",
     "applyUpdate": "Update & Restart",
