@@ -1260,6 +1260,9 @@ tbody tr:hover td { background: var(--surface-2); }
   gap: 8px;
   justify-content: flex-end;
 }
+.trend-legend { display: flex; gap: 14px; align-items: center; font-size: 11px; color: var(--text-muted); }
+.trend-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.trend-legend .lg-dot { width: 8px; height: 8px; border-radius: 2px; }
 .chart-tooltip {
   position: absolute;
   pointer-events: none;
@@ -1850,9 +1853,13 @@ window._firebaseOAuth = async function(provider) {
             <div class="section-title" data-i18n="section.overviewTrend.title">Request Trend (24h)</div>
             <div class="section-desc" data-i18n="section.overviewTrend.desc">Requests and errors per hour</div>
           </div>
+          <div class="trend-legend" id="overview-trend-legend"></div>
         </div>
         <div class="section-body">
-          <div class="overview-trend-wrap" style="position:relative;width:100%;height:120px;"><canvas id="overview-trend-canvas"></canvas></div>
+          <div class="overview-trend-wrap" style="position:relative;width:100%;height:170px;">
+            <canvas id="overview-trend-canvas"></canvas>
+            <div class="chart-tooltip" id="overview-trend-tooltip"></div>
+          </div>
           <div id="overview-trend-empty"></div>
         </div>
       </div>
@@ -3809,43 +3816,172 @@ docker compose up -d --force-recreate</pre>
 
   // Mini 24h request/error trend. Reuses the DPR-aware _setupCanvas + _smoothPath;
   // zero-baseline, Y scaled to real max. Uses hourlyBuckets (success derived).
+  // Resolve a CSS custom property to a concrete color (canvas can't use var()).
+  _cssColor(name, fallback) {
+    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+    return v || fallback;
+  },
+  _compactNum(v) {
+    if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(Math.round(v));
+  },
+  // color (#rgb/#rrggbb/rgb()) → rgba string at the given alpha.
+  _hexA(color, a) {
+    const c = String(color).trim();
+    let r = 59, g = 130, b = 246;
+    const h = c.match(/^#([\da-f]{3}|[\da-f]{6})$/i);
+    if (h) {
+      const x = h[1].length === 3 ? h[1].split('').map(ch => ch + ch).join('') : h[1];
+      const n = parseInt(x, 16); r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255;
+    } else {
+      const m = c.match(/rgba?\(([^)]+)\)/i);
+      if (m) { const p = m[1].split(',').map(s => parseFloat(s)); r = p[0]; g = p[1]; b = p[2]; }
+    }
+    return `rgba(${r},${g},${b},${a})`;
+  },
+
+  // Request-trend area chart (KiroStudio AreaTrendChart quality): smooth area +
+  // resolved theme colors, Y compact-number gridlines, X time labels, a faint
+  // success-rate overlay (right axis 0–100%), and a hover crosshair + tooltip.
   _renderOverviewTrend(s) {
     const canvas = document.getElementById('overview-trend-canvas');
     const emptyEl = document.getElementById('overview-trend-empty');
+    const legendEl = document.getElementById('overview-trend-legend');
+    const tip = document.getElementById('overview-trend-tooltip');
     if (!canvas) return;
-    const buckets = s && Array.isArray(s.hourlyBuckets) ? s.hourlyBuckets.slice(-24) : [];
-    if (buckets.length === 0) {
+    const raw = s && Array.isArray(s.hourlyBuckets) ? s.hourlyBuckets.slice(-24) : [];
+    if (raw.length === 0) {
       canvas.style.display = 'none';
+      if (legendEl) legendEl.innerHTML = '';
       if (emptyEl) emptyEl.innerHTML = `<div class="text-sm text-muted">${I18n.t('overview.trend.empty')}</div>`;
       return;
     }
     canvas.style.display = 'block';
     if (emptyEl) emptyEl.innerHTML = '';
+    const acc = this._cssColor('--accent', '#3b82f6');
+    const err = this._cssColor('--error', '#ef4444');
+    const suc = this._cssColor('--success', '#22c55e');
+    const dim = this._cssColor('--text-dim', '#71717a');
+    const grid = this._cssColor('--border', '#26262e');
+    if (legendEl) {
+      legendEl.innerHTML =
+        `<span class="lg"><span class="lg-dot" style="background:${acc}"></span>${I18n.t('overview.trend.requests')}</span>`
+        + `<span class="lg"><span class="lg-dot" style="background:${err}"></span>${I18n.t('overview.trend.errors')}</span>`
+        + `<span class="lg"><span class="lg-dot" style="background:${suc}"></span>${I18n.t('overview.trend.successRate')}</span>`;
+    }
     const setup = this._setupCanvas(canvas);
     if (!setup || !setup.ctx) return;
     const { ctx, W, H } = setup;
-    const pad = { l: 4, r: 4, t: 8, b: 4 };
+    const buckets = raw.map(b => ({
+      hour: b.hour, requests: b.requests || 0, errors: b.errors || 0,
+      success: Math.max(0, (b.requests || 0) - (b.errors || 0)),
+      rate: (b.requests || 0) > 0 ? (Math.max(0, (b.requests || 0) - (b.errors || 0)) / b.requests) * 100 : null,
+    }));
+    this._trendPaint(ctx, W, H, buckets, { acc, err, suc, dim, grid });
+    this._trendBindHover(canvas, tip, buckets, { acc, err, suc, dim, grid });
+  },
+
+  _trendGeom(W, H, buckets) {
+    const pad = { l: 34, r: 12, t: 12, b: 20 };
     const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b;
-    const maxV = Math.max(1, ...buckets.map(b => b.requests || 0));
     const n = buckets.length;
+    const maxV = Math.max(1, ...buckets.map(b => b.requests));
     const xAt = (i) => pad.l + (n <= 1 ? cW / 2 : (i / (n - 1)) * cW);
     const yAt = (v) => pad.t + cH - (v / maxV) * cH;
+    const yRate = (p) => pad.t + cH - (p / 100) * cH; // success-rate on 0..100
+    return { pad, cW, cH, n, maxV, xAt, yAt, yRate };
+  },
+
+  _trendPaint(ctx, W, H, buckets, c, cursor) {
+    const g = this._trendGeom(W, H, buckets);
+    const { pad, cW, cH, n, maxV, xAt, yAt, yRate } = g;
     ctx.clearRect(0, 0, W, H);
-    const reqPts = buckets.map((b, i) => ({ x: xAt(i), y: yAt(b.requests || 0) }));
-    const errPts = buckets.map((b, i) => ({ x: xAt(i), y: yAt(b.errors || 0) }));
-    // requests area
-    ctx.beginPath(); ctx.moveTo(reqPts[0].x, pad.t + cH);
-    ctx.lineTo(reqPts[0].x, reqPts[0].y);
+    // Y gridlines + compact labels (3 rows)
+    ctx.font = '10px var(--mono, monospace)'; ctx.textBaseline = 'middle';
+    for (let k = 0; k <= 3; k++) {
+      const v = (maxV / 3) * k; const y = yAt(v);
+      ctx.strokeStyle = c.grid; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = c.dim; ctx.textAlign = 'right';
+      ctx.fillText(this._compactNum(v), pad.l - 6, y);
+    }
+    // X time labels (first / mid / last)
+    ctx.textAlign = 'center';
+    [0, Math.floor((n - 1) / 2), n - 1].forEach((i) => {
+      if (i < 0 || i >= n) return;
+      const d = new Date(buckets[i].hour);
+      ctx.fillText(String(d.getHours()).padStart(2, '0') + ':00', xAt(i), H - 8);
+    });
+    const reqPts = buckets.map((b, i) => ({ x: xAt(i), y: yAt(b.requests) }));
+    // requests area + line
+    ctx.beginPath(); ctx.moveTo(reqPts[0].x, pad.t + cH); ctx.lineTo(reqPts[0].x, reqPts[0].y);
     this._smoothPath(ctx, reqPts, false);
     ctx.lineTo(reqPts[n - 1].x, pad.t + cH); ctx.closePath();
-    ctx.fillStyle = 'rgba(59,130,246,.14)'; ctx.fill();
+    const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + cH);
+    grad.addColorStop(0, this._hexA(c.acc, 0.22)); grad.addColorStop(1, this._hexA(c.acc, 0.02));
+    ctx.fillStyle = grad; ctx.fill();
     ctx.beginPath(); this._smoothPath(ctx, reqPts, true);
-    ctx.strokeStyle = 'var(--accent)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = c.acc; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
     // errors line (only if any)
-    if (buckets.some(b => (b.errors || 0) > 0)) {
-      ctx.beginPath(); this._smoothPath(ctx, errPts, true);
-      ctx.strokeStyle = 'var(--error)'; ctx.lineWidth = 1.2; ctx.stroke();
+    if (buckets.some(b => b.errors > 0)) {
+      const ep = buckets.map((b, i) => ({ x: xAt(i), y: yAt(b.errors) }));
+      ctx.beginPath(); this._smoothPath(ctx, ep, true);
+      ctx.strokeStyle = c.err; ctx.lineWidth = 1.5; ctx.stroke();
     }
+    // success-rate overlay (faint dashed, right-axis 0..100)
+    const rr = buckets.map((b, i) => ({ x: xAt(i), y: b.rate == null ? null : yRate(b.rate) })).filter(p => p.y != null);
+    if (rr.length > 1) {
+      ctx.save(); ctx.setLineDash([3, 3]); ctx.globalAlpha = 0.55;
+      ctx.beginPath(); this._smoothPath(ctx, rr, true);
+      ctx.strokeStyle = c.suc; ctx.lineWidth = 1.25; ctx.stroke(); ctx.restore();
+    }
+    // hover crosshair + marker
+    if (cursor != null && cursor >= 0 && cursor < n) {
+      const x = xAt(cursor);
+      ctx.strokeStyle = c.dim; ctx.globalAlpha = 0.5; ctx.setLineDash([2, 2]);
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + cH); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      ctx.fillStyle = c.acc; ctx.beginPath(); ctx.arc(x, yAt(buckets[cursor].requests), 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+  },
+
+  _trendBindHover(canvas, tip, buckets, c) {
+    // Rebind fresh each render (data changed); guard against stacking listeners.
+    if (canvas._trendHandlers) {
+      canvas.removeEventListener('mousemove', canvas._trendHandlers.move);
+      canvas.removeEventListener('mouseleave', canvas._trendHandlers.leave);
+    }
+    const repaint = (cursor) => {
+      const setup = this._setupCanvas(canvas);
+      if (setup && setup.ctx) this._trendPaint(setup.ctx, setup.W, setup.H, buckets, c, cursor);
+    };
+    const move = (ev) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const g = this._trendGeom(rect.width, rect.height, buckets);
+      let idx = Math.round((x - g.pad.l) / (g.cW / Math.max(1, g.n - 1)));
+      idx = Math.max(0, Math.min(g.n - 1, idx));
+      repaint(idx);
+      if (!tip) return;
+      const b = buckets[idx];
+      const d = new Date(b.hour);
+      tip.innerHTML =
+        `<div class="tt-time">${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:00</div>`
+        + `<div class="tt-row"><span class="tt-dot" style="background:${c.acc}"></span><span class="tt-label">${I18n.t('overview.trend.requests')}</span><span class="tt-value">${b.requests}</span></div>`
+        + `<div class="tt-row"><span class="tt-dot" style="background:${c.err}"></span><span class="tt-label">${I18n.t('overview.trend.errors')}</span><span class="tt-value">${b.errors}</span></div>`
+        + `<div class="tt-row"><span class="tt-dot" style="background:${c.suc}"></span><span class="tt-label">${I18n.t('overview.trend.successRate')}</span><span class="tt-value">${b.rate == null ? '—' : b.rate.toFixed(1) + '%'}</span></div>`;
+      tip.classList.add('show'); tip.style.transform = 'none';
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      let left = x + 14; if (left + tw > rect.width - 4) left = x - 14 - tw;
+      left = Math.max(4, Math.min(left, rect.width - tw - 4));
+      let top = (ev.clientY - rect.top) + 14; if (top + th > rect.height - 4) top = rect.height - th - 4;
+      tip.style.left = left + 'px'; tip.style.top = Math.max(4, top) + 'px';
+    };
+    const leave = () => { if (tip) tip.classList.remove('show'); repaint(null); };
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseleave', leave);
+    canvas._trendHandlers = { move, leave };
   },
 
   async loadOverview() {

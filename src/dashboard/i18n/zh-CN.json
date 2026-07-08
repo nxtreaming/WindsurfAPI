@@ -1177,6 +1177,7 @@
     "trend": {
       "requests": "请求",
       "errors": "错误",
+      "successRate": "成功率",
       "empty": "暂无趋势数据"
     }
   },

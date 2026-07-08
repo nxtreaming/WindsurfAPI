@@ -1177,6 +1177,7 @@
     "trend": {
       "requests": "Requests",
       "errors": "Errors",
+      "successRate": "Success rate",
       "empty": "No trend data"
     }
   },
