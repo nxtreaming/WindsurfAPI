@@ -19,7 +19,7 @@
 
 import { randomUUID } from 'crypto';
 import { streamChat as realStreamChat, isRetryable } from './devin-connect.js';
-import { ToolCallStreamParser, parseToolCallsFromText } from './handlers/tool-emulation.js';
+import { ToolCallStreamParser, parseToolCallsFromText, isWeakEmulationModel } from './handlers/tool-emulation.js';
 import { log } from './config.js';
 import { systemFingerprint } from './system-fingerprint.js';
 
@@ -98,7 +98,13 @@ function isEmptyCompletion(finishEv, sawContent) {
  * finish event is briefly held to end-of-stream, which it already is).
  */
 async function* streamChatWithEmptyRetry(params, { env = process.env } = {}) {
-  const max = retryOnEmptyEnabled(env) ? retryOnEmptyMax(env) : 0;
+  // Weak models (fable) return DETERMINISTIC empties on complex multi-turn / large
+  // system — paid E2E (2026-07-08, 27/27) proved retry never heals them, it only
+  // triples the upstream load and burns the account into a 3h rate limit. So for
+  // weak models we do NOT retry on empty (short-circuit). Non-weak models keep the
+  // bounded retry, where an empty is more likely genuine capacity jitter.
+  const weak = isWeakEmulationModel(params?.model || '');
+  const max = (retryOnEmptyEnabled(env) && !weak) ? retryOnEmptyMax(env) : 0;
   for (let attempt = 0; ; attempt++) {
     let sawContent = false;
     let finishEv = null;
@@ -117,6 +123,9 @@ async function* streamChatWithEmptyRetry(params, { env = process.env } = {}) {
       const backoff = retryOnEmptyBaseMs(env) * (attempt + 1);
       if (backoff) await new Promise((r) => setTimeout(r, backoff));
       continue;
+    }
+    if (weak && finishEv && isEmptyCompletion(finishEv, sawContent)) {
+      log.warn(`DEVIN_CONNECT: weak model ${params.model} empty completion (finish=${finishEv.reason ?? 'null'}) — NOT retrying (deterministic, retry would amplify rate limit)`);
     }
     if (finishEv) yield finishEv;
     return;

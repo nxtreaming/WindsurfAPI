@@ -80,7 +80,6 @@
     "confirm": "Confirm",
     "delete": "Delete",
     "refresh": "Refresh",
-    "runNow": "Run now",
     "probe": "Probe",
     "probeTitle": "Probe capabilities",
     "enable": "Enable",
@@ -102,7 +101,16 @@
     "invert": "Invert",
     "showPassword": "Show/Hide Password",
     "revealKey": "Click to reveal and copy full API key",
-    "importLocal": "Import from local Windsurf"
+    "importLocal": "Import from local Windsurf",
+    "importLocalTitle": "Read the logged-in credentials from the local Windsurf client (localhost access only)",
+    "updateLsBinaryTitle": "Download the latest language_server binary and restart the instance pool",
+    "switchLang": "Switch language",
+    "prev": "Prev",
+    "next": "Next"
+  },
+  "reveal": {
+    "confirmPrompt": "Re-enter the dashboard password to reveal this key (or the API key if no dashboard password is set):",
+    "wrongPassword": "Re-auth failed — wrong password. Key not revealed."
   },
   "status": {
     "active": "Active",
@@ -180,6 +188,10 @@
     "noResetTime": "reset time unknown"
   },
   "section": {
+    "nativeBridge": {
+      "title": "Native Bridge",
+      "desc": "Routing decisions and gray-gate visibility"
+    },
     "banStatus": {
       "title": "Health Status",
       "desc": "Accounts flagged by errors, bans, or rate limits"
@@ -190,7 +202,7 @@
     },
     "oauthLogin": {
       "title": "Quick Login (Recommended)",
-      "desc": "Login to Windsurf directly with your Google or GitHub account — no password needed"
+      "desc": "Click a button to open Windsurf's official sign-in page, log in with Google/GitHub, then paste the returned token to add the account"
     },
     "emailLogin": {
       "title": "Email & Password Login",
@@ -208,6 +220,16 @@
       "title": "Add Account",
       "desc": "Supports both API Key and Auth Token methods",
       "hint": "Recommended: Use Token method. Visit {{link}} after logging in, copy the Token and paste below. Works with all login methods (Email/Google/GitHub)."
+    },
+    "smartImport": {
+      "title": "Smart Import",
+      "desc": "Paste to auto-detect, batch supported. Recognizes Session Token / Auth1 / Firebase Refresh / email-password / labeled pairs, mixable.",
+      "placeholder": "devin-session-token$...  or  auth1_...  or  email----password  — one per line, mixable",
+      "button": "Smart Import",
+      "empty": "Paste some tokens or accounts first",
+      "importing": "Importing…",
+      "result": "Added {{added}} · Skipped {{skipped}} · Failed {{failed}}",
+      "done": "Imported {{added}} account(s)"
     },
     "accountList": {
       "title": "Account List",
@@ -259,12 +281,6 @@
       "title": "Credentials",
       "desc": "Rotate API_KEY and the dashboard password at runtime. Saved into runtime-config.json and applied immediately — no container restart or .env reload needed. Next request must use the new value; the current session will be asked to re-login."
     },
-    "quietWindow": {
-      "title": "Auto-update on quiet window",
-      "desc": "Watches per-minute request rate; if it stays at or below the threshold for the full window, auto-runs `docker compose pull && up -d`. 10-min cold-start grace; 24h cooldown after success; failure doesn't trigger cooldown. Requires /var/run/docker.sock mounted into the container (default docker-compose already does).",
-      "enable": "Enable quiet-window auto-update",
-      "hint": "Off by default. Current status: "
-    },
     "stickyByUser": {
       "title": "Sticky session per-user binding",
       "desc": "When enabled, the same user is always bound to the same upstream account regardless of model. When off, binding uses (user, model) pairs — different models may land on different accounts (useful when accounts have model-specific restrictions). Requires STICKY_SESSION_ENABLED=1.",
@@ -277,11 +293,25 @@
       "enable": "Disable account fallback",
       "hint": "Off by default. When on, a bound account failure won't consume other accounts' quota."
     },
+    "nativeToolCall": {
+      "title": "Native tool_call",
+      "desc": "When enabled, tool definitions ride the native protobuf wire (calibrated #10 ToolDef + #6 ChatToolCall) instead of prompt emulation (<tool_call> text markup). The native path is more stable for weak models (fable) with many tools and isn't subject to the prompt-emulation empty-reply limit. When off, falls back to prompt emulation (the current stable default).",
+      "enable": "Enable native tool_call",
+      "hint": "Off by default. Before enabling, send a tools-carrying request to a paid account to verify the round-trip."
+    },
+    "preflight": {
+      "title": "Pre-flight quota probe",
+      "desc": "Before each chat, probe server.codeium.com for remaining quota so requests to exhausted accounts fail fast instead of burning an upstream 429. Costs one extra round-trip per request.",
+      "enable": "Enable pre-flight probe",
+      "hint": "Off by default. Adds latency; enable when accounts frequently run dry."
+    },
     "droughtRestrict": {
       "title": "Block premium models during drought",
       "desc": "When every active account is below 5% weekly quota, premium model requests (claude-opus / claude-sonnet etc.) are refused with a clean 503 instead of burning the last bit of quota on an upstream 429. Free-tier models (gemini-2.5-flash etc.) still go through. Disable to forward premium requests anyway and accept the upstream rate-limit.",
       "enable": "Enable drought-mode premium block",
-      "hint": "Default ON. Drought state is auto-detected from the account pool (GET /dashboard/api/drought for live state)."
+      "hint": "Default ON. Drought state is auto-detected from the account pool (GET /dashboard/api/drought for live state).",
+      "thresholdLabel": "Drought threshold (weekly quota %)",
+      "thresholdHint": "Accounts below this weekly-quota % count toward drought"
     },
     "skin": {
       "title": "Interface Style",
@@ -550,6 +580,13 @@
         "output": "Output"
       }
     },
+    "credits": {
+      "title": "Credits Spent",
+      "unit": "credits",
+      "byModel": "By model",
+      "subtitle": "{{today}} credits today",
+      "empty": "No spend recorded yet"
+    },
     "banStats": {
       "title": "Health Overview"
     },
@@ -605,6 +642,7 @@
     "custom": "Customized"
   },
   "login": {
+    "releaseNotes": "v{{version}} release notes",
     "title": "Control Panel Login",
     "subtitle": "Please enter the admin password to continue",
     "passwordPlaceholder": "Dashboard Password",
@@ -703,8 +741,6 @@
     "clearPoolDesc": "All active Cascade sessions will be cleared. Continue?",
     "clearProxyTitle": "Clear Global Proxy",
     "clearProxyDesc": "All outbound requests will go direct until a proxy is set again. Continue?",
-    "quietWindowRunTitle": "Run Quiet-Window Update Now",
-    "quietWindowRunDesc": "This triggers a real Docker image pull and container recreate — the service will restart. This is irreversible mid-flight. Continue?",
     "switchSkinTitle": "Switch Dashboard Skin",
     "switchSkinDesc": "The dashboard will reload to apply the new skin. Continue?",
     "expToggleDesc": "This changes live routing behavior immediately. Continue?"
@@ -764,6 +800,9 @@
     "openWindsurfToken": "Open windsurf.com for Token",
     "tokenPlaceholder": "Paste Auth Token...",
     "addWithToken": "Add via Token",
+    "step2Title": "② Paste the token Windsurf gives you",
+    "step2Desc": "After signing in on the new tab, the page shows a token string — copy it here and click Add.",
+    "openManually": "Sign-in page didn't open? Click here",
     "status": {
       "loading": "Logging in via {{provider}}...",
       "success": "Login successful! {{email}} added to pool",
@@ -773,6 +812,9 @@
       "codeiumRegistering": "{{label}} auth success, registering Codeium...",
       "loginSuccess": "Login successful {{email}} added to pool",
       "loginFailed": "{{label}} login failed: {{error}}",
+      "opened": "Opened Windsurf {{label}} sign-in in a new tab — finish there, then copy the token below",
+      "popupBlocked": "Popup blocked by the browser — use the link below to open the sign-in page manually",
+      "adding": "Adding account...",
       "originBlocked": "{{label}} OAuth is blocked for this dashboard origin by Firebase. Use Auth Token from windsurf.com/show-auth-token and add it in Account Management."
     }
   },
@@ -817,7 +859,28 @@
     "importSuccess": "Imported {{email}}",
     "unavailable": "Available only on localhost deployments — \"local Windsurf\" on a remote server belongs to someone else's machine, not yours."
   },
+  "accounts": {
+    "tierFilter": {
+      "title": "Filter by tier",
+      "all": "All tiers",
+      "pro": "Pro",
+      "free": "Free",
+      "unknown": "Unknown",
+      "expired": "Expired"
+    },
+    "density": {
+      "title": "Toggle compact / comfortable density",
+      "label": "Compact"
+    },
+    "export": {
+      "title": "Export all accounts (metadata only, no secret keys)",
+      "label": "Export",
+      "done": "Exported {{count}} accounts",
+      "failed": "Export failed"
+    }
+  },
   "account": {
+    "tierManualBadge": "manual",
     "addSuccess": "Account added",
     "deleteSuccess": "Account deleted",
     "enableSuccess": "Account enabled",
@@ -906,20 +969,6 @@
     "fileLoaded": "Selected file: {{name}}",
     "fileReadFailed": "Failed to read file: {{error}}"
   },
-  "quietWindow": {
-    "status": {
-      "disabled": "disabled",
-      "coldStart": "cold-start grace",
-      "cooldown": "cooldown",
-      "busy": "busy",
-      "eligible": "quiet · eligible"
-    },
-    "never": "never",
-    "lastUpdate": "last update",
-    "loadFailed": "load failed",
-    "triggered": "triggered",
-    "triggerFailed": "trigger failed"
-  },
   "otp": {
     "codeSent": "Verification code sent. Check your email."
   },
@@ -938,6 +987,7 @@
     "enterHostPort": "Please enter host and port first",
     "experimentalEnabled": "Experimental feature enabled",
     "experimentalDisabled": "Experimental feature disabled",
+    "droughtThresholdSaved": "Drought threshold saved: {{value}}%",
     "toggleFailed": "Toggle failed: {{error}}",
     "modeUpdated": "Mode updated",
     "defaultModelUpdated": "Default model updated",
@@ -1098,6 +1148,9 @@
     "langToggleToEn": "Switch to English",
     "langToggleToZh": "切换到中文"
   },
+  "theme": {
+    "toggle": "Toggle light/dark mode"
+  },
   "placeholder": {
     "noProxy": "No proxy"
   },
@@ -1167,6 +1220,7 @@
       "transientReplays": "Transient replays",
       "livenessRecovered": "Liveness recovered",
       "credDecryptFail": "Cred decrypt fail",
+      "silentOk": "Nominal",
       "empty": "No connection metrics"
     },
     "rankings": {

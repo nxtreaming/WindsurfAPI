@@ -61,9 +61,9 @@ export const MODELS = {
   'claude-opus-4-8-max-fast':       { name: 'claude-opus-4-8-max-fast',       provider: 'anthropic', enumValue: 0,   modelUid: 'claude-opus-4-8-max-fast', credit: 100 },
 
   // ── GPT ─────────────────────────────────────────────────
-  'gpt-4o':                         { name: 'gpt-4o',                         provider: 'openai', enumValue: 109, modelUid: 'MODEL_CHAT_GPT_4O_2024_08_06', credit: 1 },
+  'gpt-4o':                         { name: 'gpt-4o',                         provider: 'openai', enumValue: 109, modelUid: 'MODEL_CHAT_GPT_4O_2024_08_06', credit: 1 , deprecated: true },
   'gpt-4o-mini':                    { name: 'gpt-4o-mini',                    provider: 'openai', enumValue: 113, credit: 0.5, deprecated: true },
-  'gpt-4.1':                        { name: 'gpt-4.1',                        provider: 'openai', enumValue: 259, modelUid: 'MODEL_CHAT_GPT_4_1_2025_04_14', credit: 1 },
+  'gpt-4.1':                        { name: 'gpt-4.1',                        provider: 'openai', enumValue: 259, modelUid: 'MODEL_CHAT_GPT_4_1_2025_04_14', credit: 1 , deprecated: true },
   'gpt-4.1-mini':                   { name: 'gpt-4.1-mini',                   provider: 'openai', enumValue: 260, credit: 0.5, deprecated: true },
   'gpt-4.1-nano':                   { name: 'gpt-4.1-nano',                   provider: 'openai', enumValue: 261, credit: 0.25, deprecated: true },
   'gpt-5':                          { name: 'gpt-5',                          provider: 'openai', enumValue: 340, modelUid: 'MODEL_PRIVATE_6', credit: 0.5 },
@@ -154,11 +154,11 @@ export const MODELS = {
   'gpt-oss-120b':                   { name: 'gpt-oss-120b',                   provider: 'openai', enumValue: 0,   modelUid: 'MODEL_GPT_OSS_120B', credit: 0.25 },
 
   // ── O-series ────────────────────────────────────────────
-  'o3-mini':                        { name: 'o3-mini',                        provider: 'openai', enumValue: 207, credit: 0.5 },
-  'o3':                             { name: 'o3',                             provider: 'openai', enumValue: 218, modelUid: 'MODEL_CHAT_O3', credit: 1 },
-  'o3-high':                        { name: 'o3-high',                        provider: 'openai', enumValue: 0,   modelUid: 'MODEL_CHAT_O3_HIGH', credit: 1 },
-  'o3-pro':                         { name: 'o3-pro',                         provider: 'openai', enumValue: 294, credit: 4 },
-  'o4-mini':                        { name: 'o4-mini',                        provider: 'openai', enumValue: 264, credit: 0.5 },
+  'o3-mini':                        { name: 'o3-mini',                        provider: 'openai', enumValue: 207, credit: 0.5 , deprecated: true },
+  'o3':                             { name: 'o3',                             provider: 'openai', enumValue: 218, modelUid: 'MODEL_CHAT_O3', credit: 1 , deprecated: true },
+  'o3-high':                        { name: 'o3-high',                        provider: 'openai', enumValue: 0,   modelUid: 'MODEL_CHAT_O3_HIGH', credit: 1 , deprecated: true },
+  'o3-pro':                         { name: 'o3-pro',                         provider: 'openai', enumValue: 294, credit: 4 , deprecated: true },
+  'o4-mini':                        { name: 'o4-mini',                        provider: 'openai', enumValue: 264, credit: 0.5 , deprecated: true },
 
   // ── Astraflow (UCloud) ─────────────────────────────────────
   // Astraflow is an OpenAI-compatible aggregation platform supporting 200+ models.
@@ -167,15 +167,15 @@ export const MODELS = {
   // Website: https://astraflow.ucloud-global.com (global) / https://astraflow.ucloud.cn (CN)
   // These entries use provider:'astraflow' and set enumValue:0 / modelUid equal to the
   // upstream model ID so the passthrough layer can forward them to the Astraflow base URL.
-  'astraflow/gpt-4o':               { name: 'astraflow/gpt-4o',               provider: 'astraflow', enumValue: 0, modelUid: 'gpt-4o',                    credit: 1 },
-  'astraflow/gpt-4.1':              { name: 'astraflow/gpt-4.1',              provider: 'astraflow', enumValue: 0, modelUid: 'gpt-4.1',                   credit: 1 },
-  'astraflow/gpt-4o-mini':          { name: 'astraflow/gpt-4o-mini',          provider: 'astraflow', enumValue: 0, modelUid: 'gpt-4o-mini',               credit: 0.5 },
-  'astraflow/claude-3.5-sonnet':    { name: 'astraflow/claude-3.5-sonnet',    provider: 'astraflow', enumValue: 0, modelUid: 'claude-3-5-sonnet-20241022', credit: 2 },
-  'astraflow/claude-3.7-sonnet':    { name: 'astraflow/claude-3.7-sonnet',    provider: 'astraflow', enumValue: 0, modelUid: 'claude-3-7-sonnet-20250219', credit: 2 },
-  'astraflow/deepseek-v3':          { name: 'astraflow/deepseek-v3',          provider: 'astraflow', enumValue: 0, modelUid: 'deepseek-v3',               credit: 1 },
-  'astraflow/deepseek-r1':          { name: 'astraflow/deepseek-r1',          provider: 'astraflow', enumValue: 0, modelUid: 'deepseek-r1',               credit: 2 },
-  'astraflow/llama-3.3-70b':        { name: 'astraflow/llama-3.3-70b',        provider: 'astraflow', enumValue: 0, modelUid: 'llama-3.3-70b-instruct',    credit: 0.5 },
-  'astraflow/gemini-2.0-flash':     { name: 'astraflow/gemini-2.0-flash',     provider: 'astraflow', enumValue: 0, modelUid: 'gemini-2.0-flash',          credit: 0.5 },
+  'astraflow/gpt-4o':               { name: 'astraflow/gpt-4o',               provider: 'astraflow', enumValue: 0, modelUid: 'gpt-4o',                    credit: 1 , deprecated: true },
+  'astraflow/gpt-4.1':              { name: 'astraflow/gpt-4.1',              provider: 'astraflow', enumValue: 0, modelUid: 'gpt-4.1',                   credit: 1 , deprecated: true },
+  'astraflow/gpt-4o-mini':          { name: 'astraflow/gpt-4o-mini',          provider: 'astraflow', enumValue: 0, modelUid: 'gpt-4o-mini',               credit: 0.5 , deprecated: true },
+  'astraflow/claude-3.5-sonnet':    { name: 'astraflow/claude-3.5-sonnet',    provider: 'astraflow', enumValue: 0, modelUid: 'claude-3-5-sonnet-20241022', credit: 2 , deprecated: true },
+  'astraflow/claude-3.7-sonnet':    { name: 'astraflow/claude-3.7-sonnet',    provider: 'astraflow', enumValue: 0, modelUid: 'claude-3-7-sonnet-20250219', credit: 2 , deprecated: true },
+  'astraflow/deepseek-v3':          { name: 'astraflow/deepseek-v3',          provider: 'astraflow', enumValue: 0, modelUid: 'deepseek-v3',               credit: 1 , deprecated: true },
+  'astraflow/deepseek-r1':          { name: 'astraflow/deepseek-r1',          provider: 'astraflow', enumValue: 0, modelUid: 'deepseek-r1',               credit: 2 , deprecated: true },
+  'astraflow/llama-3.3-70b':        { name: 'astraflow/llama-3.3-70b',        provider: 'astraflow', enumValue: 0, modelUid: 'llama-3.3-70b-instruct',    credit: 0.5 , deprecated: true },
+  'astraflow/gemini-2.0-flash':     { name: 'astraflow/gemini-2.0-flash',     provider: 'astraflow', enumValue: 0, modelUid: 'gemini-2.0-flash',          credit: 0.5 , deprecated: true },
 
   // ── Gemini ──────────────────────────────────────────────
   'gemini-2.5-pro':                 { name: 'gemini-2.5-pro',                 provider: 'google', enumValue: 246, modelUid: 'MODEL_GOOGLE_GEMINI_2_5_PRO', credit: 1 },
@@ -192,6 +192,8 @@ export const MODELS = {
   'deepseek-v3':                    { name: 'deepseek-v3',                    provider: 'deepseek', enumValue: 205, credit: 0.5, deprecated: true },
   'deepseek-v3-2':                  { name: 'deepseek-v3-2',                  provider: 'deepseek', enumValue: 409, credit: 0.5, deprecated: true },
   'deepseek-r1':                    { name: 'deepseek-r1',                    provider: 'deepseek', enumValue: 206, credit: 1, deprecated: true },
+  // DeepSeek V4 Pro — live in the 105 catalog (2026-07). DEVIN_CONNECT selector.
+  'deepseek-v4':                    { name: 'deepseek-v4',                    provider: 'deepseek', enumValue: 0, modelUid: 'deepseek-v4', credit: 0.5 },
 
   // ── Grok ────────────────────────────────────────────────
   'grok-3':                         { name: 'grok-3',                         provider: 'xai', enumValue: 217, modelUid: 'MODEL_XAI_GROK_3', credit: 1 },
@@ -232,6 +234,10 @@ export const MODELS = {
   'swe-1.5-thinking':               { name: 'swe-1.5-thinking',               provider: 'windsurf', enumValue: 369, modelUid: 'MODEL_SWE_1_5_THINKING', credit: 0.75 },
   'swe-1.6':                        { name: 'swe-1.6',                        provider: 'windsurf', enumValue: 420, modelUid: 'MODEL_SWE_1_6', credit: 0.5, backend: 'special_agent' },
   'swe-1.6-fast':                   { name: 'swe-1.6-fast',                   provider: 'windsurf', enumValue: 421, modelUid: 'MODEL_SWE_1_6_FAST', credit: 0.5, backend: 'special_agent' },
+  // SWE-1.7 family — live in the 105 catalog (2026-07). DEVIN_CONNECT selectors
+  // (dash-form modelUid, no special_agent backend — resolved via catalog, not LS).
+  'swe-1-7':                        { name: 'swe-1-7',                        provider: 'windsurf', enumValue: 0, modelUid: 'swe-1-7', credit: 0.5 },
+  'swe-1-7-lightning':              { name: 'swe-1-7-lightning',              provider: 'windsurf', enumValue: 0, modelUid: 'swe-1-7-lightning', credit: 0.5 },
 
   // ── Adaptive (Windsurf 2026-04-06 changelog) ────────────
   // Adaptive Model Router + Arena models live in the cloud catalog but their

@@ -6,6 +6,7 @@ import { readFileSync, existsSync } from 'fs';
 import { writeJsonAtomic } from '../fs-atomic.js';
 import { join } from 'path';
 import { config } from '../config.js';
+import { getModelInfo } from '../models.js';
 
 const STATS_FILE = join(config.dataDir, 'stats.json');
 
@@ -100,7 +101,20 @@ const _state = {
   // v2.0.91 — track upstream rejection/cooldown events
   policyBlockedCount: 0,
   rateLimitedCount: 0,
+  // v2.0.148 — Credits spend dimension. creditsByHour/Day are keyed maps
+  // { "<iso-hour|day>": creditsFloat } so the dashboard can chart spend over
+  // time. Cost per request = MODELS[model].credit (rate card), summed here so we
+  // never have to thread cost through the 10 recordRequest call sites.
+  creditsTotal: 0,
+  creditsByHour: {},   // { "2026-07-09T01:00:00Z": 12.5 }
+  creditsByDay: {},    // { "2026-07-09": 340.0 }
+  creditsByModel: {},  // { "claude-opus-4-8-medium": 88.0 }
+  // v2.0.148 — per-request detail ring buffer (bounded, persisted) so long runs
+  // keep a rolling window of recent calls for audit/export instead of losing them.
+  recentRequests: [],  // [{ ts, model, success, ms, account, credit }]  newest last, cap 500
 };
+
+const RECENT_REQ_CAP = 500;
 
 // Load persisted stats
 try {
@@ -188,7 +202,40 @@ export function recordRequest(model, success, durationMs, accountId) {
   bucket.requests++;
   if (!success) bucket.errors++;
 
+  // v2.0.148 — Credits spend + per-request detail. Cost = model's rate-card
+  // credit (getModelInfo), 0 if unknown. Persisted maps stay JSON-safe.
+  let credit = 0;
+  try { credit = Number(getModelInfo(model)?.credit) || 0; } catch { credit = 0; }
+  if (credit > 0 && success) {
+    const dayKey = hourKey.slice(0, 10);
+    _state.creditsTotal = (_state.creditsTotal || 0) + credit;
+    _state.creditsByHour[hourKey] = (_state.creditsByHour[hourKey] || 0) + credit;
+    _state.creditsByDay[dayKey] = (_state.creditsByDay[dayKey] || 0) + credit;
+    _state.creditsByModel[model] = (_state.creditsByModel[model] || 0) + credit;
+    // Prune credit hour map to ~30 days (720 keys), day map to ~90 days.
+    pruneKeyed(_state.creditsByHour, 720);
+    pruneKeyed(_state.creditsByDay, 90);
+  }
+  if (!Array.isArray(_state.recentRequests)) _state.recentRequests = [];
+  _state.recentRequests.push({
+    ts: Date.now(), model, success: !!success, ms: durationMs || 0,
+    account: accountId ? (typeof accountId === 'string' ? accountId.slice(0, 8) : String(accountId)) : null,
+    credit,
+  });
+  if (_state.recentRequests.length > RECENT_REQ_CAP) {
+    _state.recentRequests.splice(0, _state.recentRequests.length - RECENT_REQ_CAP);
+  }
+
   scheduleSave();
+}
+
+// Keep a keyed map bounded to the most recent `max` keys (lexicographic ISO
+// order == chronological). Drops the oldest keys when over cap.
+function pruneKeyed(map, max) {
+  const keys = Object.keys(map);
+  if (keys.length <= max) return;
+  keys.sort();
+  for (const k of keys.slice(0, keys.length - max)) delete map[k];
 }
 
 function percentile(sortedArr, p) {
@@ -216,6 +263,53 @@ export function getStats() {
   return out;
 }
 
+// v2.0.148 — Export the full stats state as a JSON-serializable snapshot (for
+// backup / migration / offline analysis). Includes credits + recentRequests.
+export function exportStats() {
+  return {
+    _exportedAt: new Date().toISOString(),
+    _schema: 'windsurfapi-stats-v2',
+    ..._state,
+  };
+}
+
+// v2.0.148 — Import a previously exported snapshot. MERGE mode (default) adds
+// counts onto current; REPLACE overwrites. Numeric fields are summed, keyed
+// maps merged, recentRequests concatenated + de-duped by ts+model then capped.
+export function importStats(snap, { mode = 'merge' } = {}) {
+  if (!snap || typeof snap !== 'object') return { ok: false, error: 'invalid snapshot' };
+  const src = snap._schema ? snap : snap; // tolerate raw state too
+  if (mode === 'replace') {
+    for (const k of Object.keys(_state)) delete _state[k];
+    Object.assign(_state, JSON.parse(JSON.stringify(src)));
+    delete _state._exportedAt; delete _state._schema;
+    scheduleSave();
+    return { ok: true, mode: 'replace' };
+  }
+  // merge
+  const numKeys = ['totalRequests', 'successCount', 'errorCount', 'creditsTotal', 'policyBlockedCount', 'rateLimitedCount'];
+  for (const k of numKeys) if (typeof src[k] === 'number') _state[k] = (_state[k] || 0) + src[k];
+  for (const mapKey of ['creditsByHour', 'creditsByDay', 'creditsByModel']) {
+    const m = src[mapKey]; if (m && typeof m === 'object') {
+      _state[mapKey] = _state[mapKey] || {};
+      for (const [k, v] of Object.entries(m)) _state[mapKey][k] = (_state[mapKey][k] || 0) + (Number(v) || 0);
+    }
+  }
+  if (Array.isArray(src.recentRequests)) {
+    const seen = new Set((_state.recentRequests || []).map(r => `${r.ts}|${r.model}`));
+    for (const r of src.recentRequests) {
+      const id = `${r.ts}|${r.model}`;
+      if (!seen.has(id)) { _state.recentRequests.push(r); seen.add(id); }
+    }
+    _state.recentRequests.sort((a, b) => a.ts - b.ts);
+    if (_state.recentRequests.length > RECENT_REQ_CAP) {
+      _state.recentRequests.splice(0, _state.recentRequests.length - RECENT_REQ_CAP);
+    }
+  }
+  scheduleSave();
+  return { ok: true, mode: 'merge' };
+}
+
 /** Reset all stats. */
 export function resetStats() {
   _state.totalRequests = 0;
@@ -228,6 +322,11 @@ export function resetStats() {
     fresh_input: 0, cache_read: 0, cache_write: 0,
     output: 0, total: 0, requests_with_usage: 0,
   };
+  _state.creditsTotal = 0;
+  _state.creditsByHour = {};
+  _state.creditsByDay = {};
+  _state.creditsByModel = {};
+  _state.recentRequests = [];
   _state.startedAt = Date.now();
   scheduleSave();
 }

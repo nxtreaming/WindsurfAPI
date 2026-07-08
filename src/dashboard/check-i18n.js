@@ -255,6 +255,71 @@ if (missingJsKeys.length > 0) {
   logOk('All I18n.t() keys exist in locales');
 }
 
+// 6. Chinese in localizable attributes without a data-i18n-* counterpart.
+// The whole-line whitelist above (any `data-i18n`) used to hide a hardcoded
+// Chinese title/placeholder on an element that only had data-i18n for its text
+// — so English users saw Chinese tooltips. Check each attribute individually.
+console.log('\nChecking title / placeholder / aria-label attributes for un-i18n Chinese...');
+const ATTR_PAIRS = [
+  ['title', 'data-i18n-title'],
+  ['placeholder', 'data-i18n-placeholder'],
+  ['aria-label', 'data-i18n-aria-label'],
+];
+const openTagRe = /<[a-zA-Z][^>]*>/g;
+let attrChineseViolations = 0;
+let tagMatch;
+while ((tagMatch = openTagRe.exec(htmlContent)) !== null) {
+  const tag = tagMatch[0];
+  if (tag.includes('${')) continue; // dynamic value — resolved at runtime
+  for (const [attr, i18nAttr] of ATTR_PAIRS) {
+    const am = new RegExp(`\\b${attr}="([^"]*)"`).exec(tag);
+    if (am && CHINESE_REGEX.test(am[1]) && !tag.includes(i18nAttr + '=')) {
+      const ln = htmlContent.slice(0, tagMatch.index).split('\n').length;
+      logError(`index.html:${ln}: <${attr}> has un-i18n Chinese (add ${i18nAttr}): ${am[1].slice(0, 50)}`);
+      attrChineseViolations++;
+    }
+  }
+}
+if (attrChineseViolations === 0) {
+  logOk('No un-i18n Chinese in title / placeholder / aria-label attributes');
+}
+
+// 7. Hardcoded English text nodes in the static HTML body (Prev/Next class).
+// The Chinese check can't catch these; without them a plain >Next</button> ships
+// untranslated. Scope to the static body (before the App <script>), skip dynamic
+// (${}) and non-copy tags, and allow a few brand/legal tokens.
+console.log('\nChecking static HTML body for hardcoded (non-i18n) English text...');
+const bodyStart = htmlContent.indexOf('<body>');
+const appScriptStart = htmlContent.indexOf('<script>', bodyStart);
+const bodyStartLine = htmlContent.slice(0, bodyStart).split('\n').length - 1;
+const bodyHtml = bodyStart >= 0 && appScriptStart >= 0 ? htmlContent.slice(bodyStart, appScriptStart) : '';
+const TEXT_ALLOW = /^(WindsurfAPI|bydwgx1337|©\s*Windsurf|windsurf\.com|v\d)/;
+const SKIP_TAGS = /^(svg|path|option|br|hr|script|style|code|pre)/i;
+const tokenRe = /<([a-zA-Z/!][^>]*)>|([^<]+)/g;
+let lastOpenTag = '';
+let tok;
+let hardcodedEnglishViolations = 0;
+while ((tok = tokenRe.exec(bodyHtml)) !== null) {
+  if (tok[1] !== undefined) {
+    if (!/^\//.test(tok[1])) lastOpenTag = tok[1];
+    continue;
+  }
+  const text = tok[2].trim();
+  if (!text || text.includes('${') || text.includes('{{') || CHINESE_REGEX.test(text)) continue;
+  if (!/[A-Za-z]{2,}/.test(text)) continue;                    // needs real words
+  if (/^[\d.,\s%+×x/:()[\]|·—–-]+$/.test(text)) continue;      // pure numbers/units/symbols
+  if (TEXT_ALLOW.test(text)) continue;                         // brand / legal / version
+  const tagName = lastOpenTag.split(/[\s>]/)[0].toLowerCase();
+  if (SKIP_TAGS.test(tagName)) continue;
+  if (/data-i18n(?:-[\w-]+)?=/.test(lastOpenTag)) continue;    // element carries an i18n default
+  const ln = bodyStartLine + bodyHtml.slice(0, tok.index).split('\n').length;
+  logError(`index.html:${ln}: hardcoded English text (add data-i18n): "${text.slice(0, 50)}"`);
+  hardcodedEnglishViolations++;
+}
+if (hardcodedEnglishViolations === 0) {
+  logOk('No hardcoded English text nodes in static HTML body');
+}
+
 // Summary
 console.log(`\n${'='.repeat(50)}`);
 if (violations === 0) {

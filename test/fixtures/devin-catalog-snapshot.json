@@ -1,662 +1,527 @@
 {
   "_comment": "DEVIN_CONNECT catalog whitelist. Refreshed from live GetCascadeModelConfigs 2026-07-08. Live dash-form + enum selectors; MODEL_PRIVATE_* excluded EXCEPT those referenced by SELECTOR_MAP; swe-1-6-slow free-tier fallback preserved.",
-  "_calibratedAt": "2026-07-07",
-  "_count": 131,
+  "_calibratedAt": "2026-07-08",
+  "_count": 105,
   "models": [
     {
       "selector": "claude-opus-4-8-medium",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-5-fable-medium",
-      "alias": "claude-5-fable",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-5-fable"
     },
     {
       "selector": "claude-sonnet-5-medium",
-      "alias": "claude-sonnet-5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-5"
     },
     {
       "selector": "glm-5-2",
-      "alias": "glm-5.2",
-      "provider": "zhipu"
+      "provider": "zhipu",
+      "alias": "glm-5.2"
     },
     {
       "selector": "gpt-5-5-low",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "kimi-k2-7",
-      "alias": "kimi-k2.7",
-      "provider": "moonshot"
+      "provider": "moonshot",
+      "alias": "kimi-k2.7"
     },
     {
-      "selector": "swe-1-6",
-      "alias": "swe-1.6",
+      "selector": "swe-1-7",
       "provider": "cognition"
     },
     {
-      "selector": "swe-1-6-fast",
-      "alias": "swe-1.6-fast",
+      "selector": "swe-1-7-lightning",
       "provider": "cognition"
     },
     {
       "selector": "claude-opus-4-7-medium",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-low",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-high",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-xhigh",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-max",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-low-fast",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-medium-fast",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-high-fast",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-xhigh-fast",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-7-max-fast",
-      "alias": "claude-opus-4.7",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.7"
     },
     {
       "selector": "claude-opus-4-8-low",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-high",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-xhigh",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-max",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-low-fast",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-medium-fast",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-high-fast",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-xhigh-fast",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-opus-4-8-max-fast",
-      "alias": "claude-opus-4.8",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.8"
     },
     {
       "selector": "claude-5-fable-low",
-      "alias": "claude-5-fable",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-5-fable"
     },
     {
       "selector": "claude-5-fable-high",
-      "alias": "claude-5-fable",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-5-fable"
     },
     {
       "selector": "claude-5-fable-xhigh",
-      "alias": "claude-5-fable",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-5-fable"
     },
     {
       "selector": "claude-5-fable-max",
-      "alias": "claude-5-fable",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-5-fable"
     },
     {
       "selector": "claude-sonnet-5-low",
-      "alias": "claude-sonnet-5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-5"
     },
     {
       "selector": "claude-sonnet-5-high",
-      "alias": "claude-sonnet-5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-5"
     },
     {
       "selector": "claude-sonnet-5-xhigh",
-      "alias": "claude-sonnet-5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-5"
     },
     {
       "selector": "claude-sonnet-5-max",
-      "alias": "claude-sonnet-5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-5"
     },
     {
       "selector": "gemini-3-5-flash-minimal",
-      "alias": "gemini-3.5-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.5-flash"
     },
     {
       "selector": "gemini-3-5-flash-low",
-      "alias": "gemini-3.5-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.5-flash"
     },
     {
       "selector": "gemini-3-5-flash-medium",
-      "alias": "gemini-3.5-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.5-flash"
     },
     {
       "selector": "gemini-3-5-flash-high",
-      "alias": "gemini-3.5-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.5-flash"
     },
     {
       "selector": "glm-5-2-max",
-      "alias": "glm-5.2",
-      "provider": "zhipu"
+      "provider": "zhipu",
+      "alias": "glm-5.2"
     },
     {
       "selector": "glm-5-2-1m",
-      "alias": "glm-5.2",
-      "provider": "zhipu"
+      "provider": "zhipu",
+      "alias": "glm-5.2"
     },
     {
       "selector": "glm-5-2-max-1m",
-      "alias": "glm-5.2",
-      "provider": "zhipu"
+      "provider": "zhipu",
+      "alias": "glm-5.2"
     },
     {
       "selector": "glm-5-2-none",
-      "alias": "glm-5.2",
-      "provider": "zhipu"
+      "provider": "zhipu",
+      "alias": "glm-5.2"
     },
     {
       "selector": "glm-5-2-none-1m",
-      "alias": "glm-5.2",
-      "provider": "zhipu"
+      "provider": "zhipu",
+      "alias": "glm-5.2"
     },
     {
       "selector": "claude-opus-4-6",
-      "alias": "claude-opus-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.6"
     },
     {
       "selector": "claude-opus-4-6-thinking",
-      "alias": "claude-opus-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.6"
     },
     {
       "selector": "claude-opus-4-6-1m",
-      "alias": "claude-opus-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.6"
     },
     {
       "selector": "claude-opus-4-6-thinking-1m",
-      "alias": "claude-opus-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.6"
     },
     {
       "selector": "gpt-5-4-none",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-low",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-medium",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-high",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-xhigh",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-5-none",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-medium",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-high",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-xhigh",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-none-priority",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-low-priority",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-medium-priority",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-high-priority",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-5-xhigh-priority",
-      "alias": "gpt-5.5",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.5"
     },
     {
       "selector": "gpt-5-4-none-priority",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-low-priority",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-medium-priority",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-high-priority",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-xhigh-priority",
-      "alias": "gpt-5.4",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4"
     },
     {
       "selector": "gpt-5-4-mini-low",
-      "alias": "gpt-5.4-mini",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4-mini"
     },
     {
       "selector": "gpt-5-4-mini-medium",
-      "alias": "gpt-5.4-mini",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4-mini"
     },
     {
       "selector": "gpt-5-4-mini-high",
-      "alias": "gpt-5.4-mini",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4-mini"
     },
     {
       "selector": "gpt-5-4-mini-xhigh",
-      "alias": "gpt-5.4-mini",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.4-mini"
     },
     {
       "selector": "claude-sonnet-4-6",
-      "alias": "claude-sonnet-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-4.6"
     },
     {
       "selector": "claude-sonnet-4-6-thinking",
-      "alias": "claude-sonnet-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-4.6"
     },
     {
       "selector": "claude-sonnet-4-6-1m",
-      "alias": "claude-sonnet-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-4.6"
     },
     {
       "selector": "claude-sonnet-4-6-thinking-1m",
-      "alias": "claude-sonnet-4.6",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-4.6"
     },
     {
       "selector": "MODEL_GPT_5_2_LOW",
-      "alias": "gpt-5.2",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.2"
     },
     {
       "selector": "MODEL_GPT_5_2_MEDIUM",
-      "alias": "gpt-5.2",
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_LOW_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_MEDIUM_PRIORITY",
-      "alias": null,
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.2"
     },
     {
       "selector": "MODEL_CLAUDE_4_5_OPUS",
-      "alias": "claude-opus-4.5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.5"
     },
     {
       "selector": "MODEL_CLAUDE_4_5_OPUS_THINKING",
-      "alias": "claude-opus-4.5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-opus-4.5"
     },
     {
       "selector": "MODEL_SWE_1_5",
-      "alias": "",
       "provider": "cognition"
     },
     {
       "selector": "MODEL_PRIVATE_11",
-      "alias": "",
       "provider": "anthropic"
     },
     {
       "selector": "MODEL_PRIVATE_2",
-      "alias": "claude-sonnet-4.5",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-4.5"
     },
     {
       "selector": "MODEL_PRIVATE_3",
-      "alias": "claude-sonnet-4.5",
-      "provider": "anthropic"
-    },
-    {
-      "selector": "MODEL_CHAT_GPT_4_1_2025_04_14",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GOOGLE_GEMINI_2_5_PRO",
-      "alias": null,
-      "provider": "google"
-    },
-    {
-      "selector": "MODEL_CHAT_O3",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_CHAT_O3_HIGH",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_CHAT_GPT_5_CODEX",
-      "alias": null,
-      "provider": "openai"
+      "provider": "anthropic",
+      "alias": "claude-sonnet-4.5"
     },
     {
       "selector": "MODEL_GPT_5_2_NONE",
-      "alias": "gpt-5.2",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.2"
     },
     {
       "selector": "MODEL_GPT_5_2_HIGH",
-      "alias": "gpt-5.2",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.2"
     },
     {
       "selector": "MODEL_GPT_5_2_XHIGH",
-      "alias": "gpt-5.2",
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_NONE_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_HIGH_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_XHIGH_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_LOW",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_MEDIUM",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_HIGH",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_XHIGH",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_LOW_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_MEDIUM_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_HIGH_PRIORITY",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_2_CODEX_XHIGH_PRIORITY",
-      "alias": null,
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.2"
     },
     {
       "selector": "gpt-5-3-codex-low",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-medium",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-high",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-xhigh",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-low-priority",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-medium-priority",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-high-priority",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "gpt-5-3-codex-xhigh-priority",
-      "alias": "gpt-5.3-codex",
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_1_CODEX_MAX_LOW",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_1_CODEX_MAX_MEDIUM",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_1_CODEX_MAX_HIGH",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_1_CODEX_LOW",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_GPT_5_1_CODEX_MINI_LOW",
-      "alias": null,
-      "provider": "openai"
-    },
-    {
-      "selector": "MODEL_CHAT_GPT_4O_2024_08_06",
-      "alias": null,
-      "provider": "openai"
+      "provider": "openai",
+      "alias": "gpt-5.3-codex"
     },
     {
       "selector": "kimi-k2-6",
-      "alias": "kimi-k2.6",
-      "provider": "moonshot"
+      "provider": "moonshot",
+      "alias": "kimi-k2.6"
+    },
+    {
+      "selector": "swe-1-6",
+      "provider": "cognition",
+      "alias": "swe-1.6"
+    },
+    {
+      "selector": "swe-1-6-fast",
+      "provider": "cognition",
+      "alias": "swe-1.6-fast"
     },
     {
       "selector": "MODEL_SWE_1_5_SLOW",
-      "alias": "",
       "provider": "cognition"
-    },
-    {
-      "selector": "MODEL_GPT_OSS_120B",
-      "alias": null,
-      "provider": "openai"
     },
     {
       "selector": "gemini-3-1-pro-low",
-      "alias": "gemini-3.1-pro",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.1-pro"
     },
     {
       "selector": "gemini-3-1-pro-high",
-      "alias": "gemini-3.1-pro",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.1-pro"
     },
     {
       "selector": "MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL",
-      "alias": "gemini-3.0-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.0-flash"
     },
     {
       "selector": "MODEL_GOOGLE_GEMINI_3_0_FLASH_LOW",
-      "alias": "gemini-3.0-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.0-flash"
     },
     {
       "selector": "MODEL_GOOGLE_GEMINI_3_0_FLASH_MEDIUM",
-      "alias": "gemini-3.0-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.0-flash"
     },
     {
       "selector": "MODEL_GOOGLE_GEMINI_3_0_FLASH_HIGH",
-      "alias": "gemini-3.0-flash",
-      "provider": "google"
+      "provider": "google",
+      "alias": "gemini-3.0-flash"
     },
     {
       "selector": "deepseek-v4",
-      "alias": "deepseek-v4",
-      "provider": "6"
-    },
-    {
-      "selector": "swe-1-6-slow",
-      "alias": "swe-1.6-slow",
-      "provider": "cognition"
-    },
-    {
-      "selector": "subagent-default",
-      "alias": null,
-      "provider": "unknown"
-    },
-    {
-      "selector": "glm-5-1",
-      "alias": "glm-5.1",
-      "provider": "zhipu"
+      "provider": "6",
+      "alias": "deepseek-v4"
     }
   ]
 }

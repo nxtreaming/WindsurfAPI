@@ -81,3 +81,4 @@ ghidra-proj/
 没跑完的上下文.txt
 *-context-dump.txt
 上下文*.txt
+docs/*.bak

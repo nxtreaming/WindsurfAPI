@@ -464,13 +464,13 @@ describe('streamChatCompletion native tool calls', () => {
   });
 });
 
-// retry-on-empty: fable (and other capacity-jittered models) occasionally return
-// a COMPLETED turn (finish=stop, completion_tokens<=2) with zero content. This is
-// probabilistic upstream capacity jitter, not a deterministic tool-count
-// threshold and not an outage. The adapter transparently re-issues the identical
-// request a bounded number of times. It must (a) heal a subsequent real answer,
-// (b) never trim tools, (c) not retry a genuine terminal state (length /
-// tool_calls / non-empty answer), (d) be a no-op on the hot path.
+// retry-on-empty: NON-weak models occasionally return a COMPLETED turn
+// (finish=stop) with zero content — probabilistic upstream capacity jitter. The
+// adapter transparently re-issues the identical request a bounded number of
+// times. It must (a) heal a subsequent real answer, (b) never trim tools, (c) not
+// retry a genuine terminal state, (d) be a no-op on the hot path. NOTE: weak
+// models (fable) are EXEMPT — their empties are deterministic (paid 27/27), so
+// retry only amplifies rate limits; see the dedicated weak-model test below.
 describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
   const RETRY_ENV = ['DEVIN_CONNECT_RETRY_ON_EMPTY', 'DEVIN_CONNECT_RETRY_ON_EMPTY_MAX', 'DEVIN_CONNECT_RETRY_ON_EMPTY_MS'];
   afterEach(() => { for (const k of RETRY_ENV) delete process.env[k]; });
@@ -493,9 +493,24 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       calls++;
       for (const ev of (calls === 1 ? EMPTY : REAL)) yield ev;
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 2, 'one empty + one heal');
     assert.equal(body.choices[0].message.content, 'real answer');
+  });
+
+  // Weak-model exemption (paid E2E 2026-07-08): fable empties are DETERMINISTIC,
+  // retry never heals + triples upstream load → 3h rate limit. So a weak model
+  // must NOT retry on empty (single call, empty result returned as-is).
+  it('weak model (fable) does NOT retry on empty — single call, no amplification', async () => {
+    process.env.DEVIN_CONNECT_RETRY_ON_EMPTY_MS = '0';
+    let calls = 0;
+    __setStreamChatForTest(async function* () {
+      calls++;
+      for (const ev of EMPTY) yield ev;
+    });
+    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    assert.equal(calls, 1, 'weak model fired exactly once (no retry)');
+    assert.equal(body.choices[0].message.content, '', 'empty returned as-is, not errored');
   });
 
   // REGRESSION (live paid probe 2026-07-08): genuine fable empties came back with
@@ -510,7 +525,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       if (calls === 1) yield { type: 'finish', reason: 'stop', usage: { prompt_tokens: 8, completion_tokens: 9, total_tokens: 17 } };
       else for (const ev of REAL) yield ev;
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 2, 'ct=9 empty is still healed');
     assert.equal(body.choices[0].message.content, 'real answer');
   });
@@ -523,7 +538,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       for (const ev of (calls === 1 ? EMPTY : REAL)) yield ev;
     });
     const { send, frames } = collectSend();
-    const result = await streamChatCompletion({ model: 'claude-5-fable-medium', messages: [] }, send);
+    const result = await streamChatCompletion({ model: 'swe-1-6-slow', messages: [] }, send);
     assert.equal(calls, 2);
     assert.equal(result.content, 'real answer');
     // Exactly ONE role-prime frame (the empty attempt must not have primed/emitted).
@@ -544,7 +559,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       calls++;
       for (const ev of EMPTY) yield ev;
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 3, 'initial + 2 retries');
     assert.equal(body.choices[0].message.content, ''); // degrades to empty, no throw
     assert.equal(body.choices[0].finish_reason, 'stop');
@@ -557,7 +572,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       calls++;
       for (const ev of EMPTY) yield ev;
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 1, 'no retry when disabled');
     assert.equal(body.choices[0].message.content, '');
   });
@@ -568,7 +583,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       calls++;
       for (const ev of REAL) yield ev;
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 1);
     assert.equal(body.choices[0].message.content, 'real answer');
   });
@@ -580,7 +595,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       calls++;
       yield { type: 'finish', reason: 'length', usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 } };
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 1, 'length is a genuine terminal state, not empty-jitter');
     assert.equal(body.choices[0].finish_reason, 'length');
   });
@@ -595,7 +610,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
         toolCalls: [{ id: 'c1', name: 'do_thing', arguments: '{}' }],
       };
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 1, 'a tool call is a real answer even with no visible text');
     assert.equal(body.choices[0].finish_reason, 'tool_calls');
   });
@@ -608,7 +623,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       yield { type: 'reasoning', text: 'thinking…' };
       yield { type: 'finish', reason: 'stop', usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 } };
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 1);
     assert.equal(body.choices[0].message.reasoning_content, 'thinking…');
   });
@@ -621,7 +636,7 @@ describe('retry-on-empty (fable capacity-jitter self-heal)', () => {
       if (calls === 1) yield { type: 'finish', reason: 'stop', usage: null };
       else for (const ev of REAL) yield ev;
     });
-    const { body } = await toChatCompletion({ model: 'claude-5-fable-medium', messages: [] });
+    const { body } = await toChatCompletion({ model: 'swe-1-6-slow', messages: [] });
     assert.equal(calls, 2, 'no usage + no content still qualifies as empty');
     assert.equal(body.choices[0].message.content, 'real answer');
   });

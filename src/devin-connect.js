@@ -413,9 +413,14 @@ export function getImageProvider(env = process.env) {
 // are deliberately NOT accepted (emitting them risks a broken frame).
 const TOOL_DEF_INT_MAX = 536870912; // 2^29, protobuf field-number ceiling
 function validTag(n) { return Number.isInteger(n) && n > 0 && n < TOOL_DEF_INT_MAX; }
-export function getToolDefTags(env = process.env) {
+// VERIFIED tool-def inner tags (paid frame-confirmed 2026-07-04, opus-4-8 on
+// teams: outer #10, name=1, description=2, parameters=3). Used as the fallback
+// when the nativeToolCall flag is on but no explicit env override is set.
+export const DEFAULT_DEF_TAGS = Object.freeze({ outer: 10, name: 1, description: 2, parameters: 3, schema: 3 });
+
+export function getToolDefTags(env = process.env, { useDefault = false } = {}) {
   const raw = String(env.DEVIN_CONNECT_TOOL_DEF_TAGS || '').trim();
-  if (!raw) return null; // unset → native tool defs disabled (prompt emulation stays)
+  if (!raw) return useDefault ? { ...DEFAULT_DEF_TAGS } : null; // unset → default (flag on) or disabled
 
   const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
   const map = {};
@@ -583,7 +588,7 @@ function buildCompletionConfig({ maxTokens, temperature, topK, topP, contextWind
  * @param {object}   [params.completion]  CompletionConfig overrides
  * @returns {Buffer} raw protobuf (un-enveloped)
  */
-export function buildGetChatMessageRequest({ token, messages, model, sessionId, completion, tools } = {}) {
+export function buildGetChatMessageRequest({ token, messages, model, sessionId, completion, tools, nativeToolCall = false } = {}) {
   if (!token) throw new Error('DEVIN_CONNECT: missing session token');
   if (!model) throw new Error('DEVIN_CONNECT: missing model selector');
 
@@ -607,6 +612,41 @@ export function buildGetChatMessageRequest({ token, messages, model, sessionId, 
       continue;
     }
     const source = msg.role === 'assistant' ? SOURCE.ASSISTANT : SOURCE.USER;
+    // Native multi-turn history (nativeToolCall): a prior assistant turn that
+    // carried tool_calls, and a role:'tool' result, are encoded as STRUCTURED
+    // wire messages (#6 ChatToolCall / role=4 tool_result #7) instead of being
+    // folded into text — so the upstream sees a self-consistent native turn
+    // history, symmetric with how we decode #6. Gated: only when nativeToolCall
+    // is on (else the text-fold path below keeps the emulation wire unchanged).
+    if (nativeToolCall && msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+      // Optional leading assistant text stays on its own role=2 text message.
+      const preText = messageText(msg.content);
+      if (preText) {
+        chatMessages.push(Buffer.concat([
+          writeStringField(1, randomUUID()),
+          writeVarintField(2, SOURCE.ASSISTANT),
+          writeStringField(3, preText),
+        ]));
+      }
+      for (const tc of msg.tool_calls) {
+        const name = tc.function?.name || tc.name || 'unknown';
+        const rawArgs = tc.function?.arguments ?? tc.arguments;
+        const argsJson = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs ?? {});
+        chatMessages.push(encodeAssistantToolCall({ id: tc.id || randomUUID(), name, argsJson }));
+      }
+      continue;
+    }
+    if (nativeToolCall && msg.role === 'tool' && msg.tool_call_id) {
+      // role=4 tool_result carrying the result text, tied by #7 tool_call_id to
+      // the preceding native #6 assistant tool_call (id echoed verbatim).
+      chatMessages.push(Buffer.concat([
+        writeStringField(1, randomUUID()),
+        writeVarintField(2, SOURCE.TOOL_RESULT),
+        writeStringField(3, messageText(msg.content) || '[tool result]'),
+        writeStringField(7, msg.tool_call_id),
+      ]));
+      continue;
+    }
     // Vision (gated): a message carrying inline images is expanded to mirror the
     // wire — the image rides a role=4 tool_result paired to a role=2 read
     // tool_call, NOT the user message (req022). imageTag == 0 → this is skipped
@@ -675,7 +715,7 @@ export function buildGetChatMessageRequest({ token, messages, model, sessionId, 
   // Native tool definitions (repeated #10) — only when the inner ToolDef tags are
   // calibrated (DEVIN_CONNECT_TOOL_DEF_TAGS). Default: tag map is null → nothing
   // emitted, tools keep flowing through prompt emulation upstream.
-  const toolTags = getToolDefTags();
+  const toolTags = getToolDefTags(process.env, { useDefault: nativeToolCall });
   let emittedReadToolDef = false;
   if (toolTags && Array.isArray(tools)) {
     for (const tool of tools) {
@@ -797,9 +837,17 @@ function parseBillingTagMap(env = process.env) {
 // merge_field jump table); the rest are ChatToolCall subfields, read from prost
 // encode_raw @0x1442fe1f0. Re-verify with scripts/re/proto_tags.py. Missing keys
 // are simply not read. See .devin-connect-calibrated.env for the pinned values.
-export function parseToolCallTagMap(env = process.env) {
+// VERIFIED tool_call decode tags (static-disasm pinned from encode_raw
+// @0x1442fe1f0 + merge_field jump table). Fallback when nativeToolCall flag is
+// on but no explicit env override is set.
+export const DEFAULT_CALL_TAGS = Object.freeze({
+  outer: 6, id: 1, name: 2, arguments_json: 3,
+  invalid_json_str: 4, invalid_json_err: 5, is_custom_tool_call: 6,
+});
+
+export function parseToolCallTagMap(env = process.env, { useDefault = false } = {}) {
   const raw = String(env.DEVIN_CONNECT_TOOL_CALL_TAGS || '').trim();
-  if (!raw) return null;
+  if (!raw) return useDefault ? { ...DEFAULT_CALL_TAGS } : null;
   const map = {};
   // All 7 subfield keys are verified-from-binary (encode_raw @0x1442fe1f0 + the
   // merge_field jump table). `name` is a real ChatToolCall field (#2), not a guess.
@@ -1430,7 +1478,7 @@ export function mapFinishReason(finish, env = process.env) {
  */
 export async function* streamChat({
   messages, model, sessionId, completion, tools,
-  token, signal, timeoutMs, deadlineMs, host, env = process.env,
+  token, signal, timeoutMs, deadlineMs, host, env = process.env, nativeToolCall = false,
 } = {}) {
   // Idle timeout: socket inactivity. Absolute deadline: total wall-clock from
   // request start — this is the one that catches a stream that keeps dribbling
@@ -1454,7 +1502,7 @@ export async function* streamChat({
   const actualModelTag = Number.parseInt(env.DEVIN_CONNECT_ACTUAL_MODEL_TAG || '', 10) || null;
   // Optional: native tool-call decode (repeated ChatToolCall) when the response
   // tags are calibrated. Off → tool calls come from prompt emulation as today.
-  const toolCallTags = parseToolCallTagMap(env);
+  const toolCallTags = parseToolCallTagMap(env, { useDefault: nativeToolCall });
   // Optional: thinking-signature decode (delta_signature/_type/thinking_id) when
   // DEVIN_CONNECT_SIGNATURE_TAG is pinned from a paid/thinking capture. Off →
   // never decoded, messages.js keeps its empty-string signature placeholder.
@@ -1468,7 +1516,7 @@ export async function* streamChat({
     ? tools.map((t) => t?.function?.name || t?.name).filter(Boolean)
     : null;
 
-  const proto = buildGetChatMessageRequest({ token: sessionToken, messages, model, sessionId, completion, tools });
+  const proto = buildGetChatMessageRequest({ token: sessionToken, messages, model, sessionId, completion, tools, nativeToolCall });
   // Request envelope is sent UNCOMPRESSED (flag 0). The live calibration showed
   // the server rejects a gzipped request frame with an opaque "internal" error;
   // it still streams gzipped frames back, which the parser handles.

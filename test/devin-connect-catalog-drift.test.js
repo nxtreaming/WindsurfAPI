@@ -23,6 +23,7 @@ const catalogSelectors = new Set(catalog.map((m) => m.selector));
 // list tiny and justified — it's the escape hatch for internal/synthetic names.
 const NON_CATALOG_TARGETS = new Set([
   'subagent-default', // internal subagent routing alias, not a public model
+  'swe-1-6-slow',     // free-tier default-degrade target; not in a paid-account catalog (105)
 ]);
 
 describe('catalog drift: snapshot integrity', () => {

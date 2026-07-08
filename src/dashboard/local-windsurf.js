@@ -44,6 +44,59 @@ export function getCandidateStateDbPaths() {
   return paths;
 }
 
+// Devin CLI stores a ready-to-use session token in credentials.toml (flat
+// `key = "value"` TOML). windsurf_api_key = "devin-session-token$<JWT>" is
+// exactly the format the whole gateway already accepts, so importing it is the
+// lowest-friction way to add an account on a local deployment — no OAuth, no
+// Firebase, no password. Platform paths mirror getCandidateStateDbPaths().
+export function getDevinCliCredentialPaths() {
+  const home = os.homedir();
+  const out = [];
+  if (process.platform === 'darwin') {
+    out.push(path.join(home, 'Library', 'Application Support', 'devin', 'credentials.toml'));
+  } else if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    out.push(path.join(appData, 'devin', 'credentials.toml'));
+  } else {
+    const xdg = process.env.XDG_CONFIG_HOME || path.join(home, '.config');
+    out.push(path.join(xdg, 'devin', 'credentials.toml'));
+    out.push(path.join(home, '.devin', 'credentials.toml'));
+  }
+  return out;
+}
+
+// Minimal flat-TOML reader (no nesting/arrays): pulls windsurf_api_key +
+// api_server_url from a Devin CLI credentials.toml. Returns a normalizeAccount
+// input shape, or a reason on miss. The raw token is never logged by callers
+// (maskKey covers it downstream).
+export async function extractFromDevinCli(credPath) {
+  if (!(await fileExists(credPath))) return { ok: false, reason: 'not_found', credPath };
+  let text;
+  try {
+    const info = await stat(credPath);
+    if (info.size > 64 * 1024) return { ok: false, reason: 'size_limit_exceeded', credPath };
+    text = await readFile(credPath, 'utf-8');
+  } catch (e) {
+    return { ok: false, reason: 'read_error', credPath, error: e.message };
+  }
+  const kv = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$/);
+    if (m) kv[m[1]] = m[2];
+  }
+  const token = kv.windsurf_api_key;
+  if (!token) return { ok: false, reason: 'no_token', credPath };
+  return {
+    ok: true,
+    credPath,
+    account: {
+      apiKey: token,
+      apiServerUrl: kv.api_server_url || null,
+      name: 'Devin CLI',
+    },
+  };
+}
+
 export function getCodeiumConfigPath() {
   const home = os.homedir();
   const xdgData = process.env.XDG_DATA_HOME;
@@ -251,6 +304,22 @@ export async function discoverWindsurfCredentials() {
         if (!seenKeys.has(a.apiKey)) {
           seenKeys.add(a.apiKey);
           accounts.push(a);
+        }
+      }
+    }
+
+    // Devin CLI credentials.toml — a ready-to-use session token, format the
+    // gateway already accepts. Normalized into the same account shape so it
+    // inherits dedup + the loopback gate + the existing import UI.
+    for (const credPath of getDevinCliCredentialPaths()) {
+      const dc = await extractFromDevinCli(credPath);
+      // Report under `.dbPath` so the sources map (keyed on dbPath) picks it up.
+      sources.push({ ok: dc.ok, reason: dc.reason || null, dbPath: credPath, accounts: dc.ok ? [1] : [] });
+      if (dc.ok) {
+        const acct = normalizeAccount(dc.account, 'devin-cli');
+        if (acct && !seenKeys.has(acct.apiKey)) {
+          seenKeys.add(acct.apiKey);
+          accounts.push(acct);
         }
       }
     }

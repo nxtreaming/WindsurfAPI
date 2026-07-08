@@ -71,16 +71,30 @@ test('dashboard sketch proxy and abnormal-account tables use lightweight summari
   assert.doesNotMatch(html, /pageSize=500/);
 });
 
-test('dashboard OAuth origin-blocked errors point users to token fallback', () => {
+test('dashboard Quick Login uses the Windsurf sign-in + token flow (no dead Firebase popup)', () => {
   const html = readFileSync(join(root, 'src/dashboard/index.html'), 'utf8');
   const sketch = readFileSync(join(root, 'src/dashboard/index-sketch.html'), 'utf8');
+
+  // index-sketch still uses the Firebase signInWithPopup flow, so it must detect the
+  // origin-block (unauthorized-domain / referer-blocked) and steer users to the token
+  // fallback rather than leaving them stuck.
+  assert.match(sketch, /isFirebaseOAuthOriginBlocked/);
+  assert.match(sketch, /requests-from-referer-\.\*are-blocked/);
+  assert.match(sketch, /unauthorized-domain/);
+
+  // Both variants surface the windsurf.com token path.
   for (const source of [html, sketch]) {
-    assert.match(source, /isFirebaseOAuthOriginBlocked/);
-    assert.match(source, /requests-from-referer-\.\*are-blocked/);
-    assert.match(source, /unauthorized-domain/);
     assert.match(source, /windsurf\.com\/show-auth-token/);
   }
-  assert.match(html, /oauth\.status\.originBlocked/);
+
+  // index.html's Quick Login no longer relies on Firebase signInWithPopup — it is
+  // permanently origin-blocked on a self-hosted public origin. It now drives the
+  // Windsurf official sign-in + paste-token flow unconditionally (App.oauthLogin →
+  // buildWindsurfSigninUrl → App.submitOAuthToken).
+  assert.match(html, /windsurf\.com\/windsurf\/signin/);
+  assert.match(html, /submitOAuthToken/);
+  // The Firebase Auth SDK (which provided signInWithPopup) must no longer be imported.
+  assert.doesNotMatch(html, /firebasejs\/[\d.]+\/firebase-auth/);
 });
 
 test('recent merged PR contributors are represented in dashboard and README credits', () => {

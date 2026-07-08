@@ -33,14 +33,6 @@ const DEFAULTS = {
     // that would 429 anyway. Can be turned off if operator prefers
     // graceful degradation over hard refusal.
     droughtRestrictPremium: true,
-    // v2.0.67 (#112) — Auto-pull docker self-update during traffic lulls.
-    // When ON the proxy watches per-minute request rate; if it stays
-    // under `autoUpdateQuietWindow.thresholdRequests` for the full
-    // `windowMinutes` window, runs the existing docker self-update
-    // flow (pulls latest image + spawns deployer sidecar to recreate
-    // the container). Default OFF — only useful for self-hosted boxes
-    // that mount /var/run/docker.sock and run via docker-compose.
-    autoUpdateQuietWindow: false,
     // When enabled with STICKY_SESSION_ENABLED=1, the sticky session
     // binding ignores the model dimension — a user gets the same
     // upstream account regardless of which model they request.
@@ -53,15 +45,23 @@ const DEFAULTS = {
     // instead of burning through other accounts in the pool.
     // Requires STICKY_SESSION_ENABLED=1. Default OFF.
     stickyNoFallback: false,
+    // Native tool_call over the DEVIN_CONNECT wire. When ON, tool definitions
+    // ride the calibrated protobuf #10 ToolDef field and responses decode the
+    // native #6 ChatToolCall — instead of prompt emulation (<tool_call> markup).
+    // Tags are VERIFIED (def "10,1,2,3" paid-confirmed, call tags static-disasm
+    // pinned). Default ON: paid E2E on 2026-07-08 confirmed opus AND fable run
+    // clean multi-turn on the native wire (mode=NATIVE, preamble off, zero empty
+    // replies) — the native path also sidesteps the emulation tool-count ceiling
+    // that made fable go empty. Flip to false to fall back to prompt emulation.
+    nativeToolCall: true,
   },
-  // v2.0.67 (#112) — Tunables for the quiet-window auto-updater.
-  // Not under `experimental` because they're not boolean flags.
-  // Keys correspond 1:1 with src/dashboard/quiet-window-updater.js DEFAULTS.
-  autoUpdateQuietWindow: {
-    windowMinutes: 5,
-    thresholdRequests: 5,
-    cooldownHours: 24,
-    coldStartGraceMs: 600000,
+  // v2.0.150 — operator-tunable numeric knobs. Kept out of `experimental`
+  // (which coerces everything to boolean). Dashboard-settable.
+  tunables: {
+    // Weekly-quota % at or below which an account counts toward drought mode
+    // (isDroughtMode + premium-model gating). Lower = more tolerant of low
+    // balances before the pool is considered dry.
+    droughtThresholdPercent: 5,
   },
   // System-level prompt templates injected into Cascade proto fields.
   // Editable from Dashboard so users can tune without code changes.
@@ -152,6 +152,29 @@ export function setExperimental(patch) {
   }
   persist();
   return getExperimental();
+}
+
+export function getTunables() {
+  return { ...(_state.tunables || {}) };
+}
+
+// Weekly-quota % threshold for drought mode. Clamped to [0, 100]; falls back
+// to the default (5) when unset or out of range.
+export function getDroughtThresholdPercent() {
+  const v = Number(_state.tunables?.droughtThresholdPercent);
+  return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 5;
+}
+
+export function setTunables(patch) {
+  if (!patch || typeof patch !== 'object') return getTunables();
+  const next = { ...(_state.tunables || {}) };
+  if (patch.droughtThresholdPercent != null) {
+    const v = Number(patch.droughtThresholdPercent);
+    if (Number.isFinite(v)) next.droughtThresholdPercent = Math.max(0, Math.min(100, v));
+  }
+  _state.tunables = next;
+  persist();
+  return getTunables();
 }
 
 export function getSystemPrompts() {

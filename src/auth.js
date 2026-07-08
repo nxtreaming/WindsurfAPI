@@ -12,7 +12,7 @@
 
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { isStickyEnabled, getStickyBinding, setStickyBinding, clearStickyBinding } from './account/sticky-session.js';
-import { isExperimentalEnabled } from './runtime-config.js';
+import { isExperimentalEnabled, getDroughtThresholdPercent } from './runtime-config.js';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, readdirSync } from 'fs';
 import { config, log } from './config.js';
 import { safeAccountRef } from './log-safety.js';
@@ -129,12 +129,13 @@ export function quotaScore(account) {
 // v2.0.57 Fix 5 — drought mode. True iff every active account has
 // weeklyPercent < threshold. Operators see this on the dashboard so
 // they can buy more accounts / wait for reset rather than chasing
-// individual rate-limit errors.
-const DROUGHT_THRESHOLD = 5;
+// individual rate-limit errors. v2.0.150: the threshold is now an operator
+// tunable (runtime-config tunables.droughtThresholdPercent, default 5).
 
 export function isDroughtMode() {
   const eligible = accounts.filter(a => a.status === 'active');
   if (!eligible.length) return false;
+  const threshold = getDroughtThresholdPercent();
   let knownCount = 0;
   let droughtCount = 0;
   for (const a of eligible) {
@@ -142,7 +143,7 @@ export function isDroughtMode() {
     const w = c && typeof c.weeklyPercent === 'number' ? c.weeklyPercent : null;
     if (w == null) continue;
     knownCount++;
-    if (w < DROUGHT_THRESHOLD) droughtCount++;
+    if (w < threshold) droughtCount++;
   }
   if (!knownCount) return false; // no quota data yet — assume not drought
   return droughtCount === knownCount;
@@ -207,7 +208,7 @@ export function getDroughtSummary() {
   }
   return {
     drought: isDroughtMode(),
-    threshold: DROUGHT_THRESHOLD,
+    threshold: getDroughtThresholdPercent(),
     activeAccounts: eligible.length,
     knownAccounts,
     lowestWeeklyPercent: lowestWeekly,
@@ -1212,7 +1213,7 @@ export function getApiKey(excludeKeys = [], modelKey = null, callerKey = null) {
   // candidate so its LS / cascade pool is ready when the chosen one
   // hits zero on the next call. Throttled per-account to once per 30s
   // so a long burst of low-quota requests doesn't slam ensureLsForAccount.
-  if (candidates.length >= 2 && quotaScore(account) < DROUGHT_THRESHOLD * 2) {
+  if (candidates.length >= 2 && quotaScore(account) < getDroughtThresholdPercent() * 2) {
     schedulePrewarm(candidates[1].account);
   }
   return {
@@ -2152,11 +2153,26 @@ function publicAccount(a, now, { view = 'full' } = {}) {
   };
 }
 
-export function getAccountList({ view = 'full', offset = 0, limit = Infinity, filter = '' } = {}) {
+// Fold every raw tier value into one of the 4 dashboard buckets. Any paid-ish
+// tier (pro / enterprise / teams / trial / premium / …) reads as "pro"; free
+// stays free, expired stays expired, and empty/unrecognized is "unknown". Keep
+// the accepted set in sync with setAccountTier's manual whitelist.
+export function tierBucket(tier) {
+  const t = String(tier || '').toLowerCase().trim();
+  if (t === 'free') return 'free';
+  if (t === 'expired') return 'expired';
+  if (t === '' || t === 'unknown') return 'unknown';
+  return 'pro';
+}
+
+export function getAccountList({ view = 'full', offset = 0, limit = Infinity, filter = '', tier = '' } = {}) {
   const now = Date.now();
   let list = accounts;
   if (filter === 'flagged') {
     list = list.filter(a => a.status === 'error' || (a.errorCount || 0) > 0 || (a.rateLimitedUntil && a.rateLimitedUntil > now));
+  }
+  if (tier) {
+    list = list.filter(a => tierBucket(a.tier) === tier);
   }
   const start = Math.max(0, Number.isFinite(offset) ? offset : 0);
   const end = Number.isFinite(limit) ? start + Math.max(0, limit) : undefined;
@@ -2173,17 +2189,20 @@ export function getAccountListStats() {
   let flagged = 0;
   let rateLimited = 0;
   let disabled = 0;
+  const byTier = { pro: 0, free: 0, unknown: 0, expired: 0 };
   for (const account of accounts) {
     const isRateLimited = !!(account.rateLimitedUntil && account.rateLimitedUntil > now);
     if (isRateLimited) rateLimited++;
     if (account.status !== 'active') disabled++;
     if (account.status === 'error' || (account.errorCount || 0) > 0 || isRateLimited) flagged++;
+    byTier[tierBucket(account.tier)]++;
   }
   return {
     ...getAccountCount(),
     flagged,
     rateLimited,
     disabled,
+    byTier,
   };
 }
 

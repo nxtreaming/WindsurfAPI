@@ -11,7 +11,6 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { VERSION, BRAND } from './version.js';
 import { abortActiveSse } from './sse-registry.js';
-import { startQuietWindowAutoUpdate, stopQuietWindowAutoUpdate } from './dashboard/quiet-window-updater.js';
 export { VERSION, BRAND };
 
 // v2.0.146 (audit F-1): last-resort process safety nets. This service must
@@ -166,12 +165,6 @@ async function main() {
 
   const server = startServer();
 
-  // v2.0.67 (#112) — quiet-window auto-update watcher. No-op until the
-  // operator flips experimental.autoUpdateQuietWindow on (default off).
-  // Runs alongside the HTTP server; ticks every minute, polls the request
-  // ring + cooldown gates, fires runDockerSelfUpdate during real lulls.
-  try { startQuietWindowAutoUpdate(); } catch (e) { log.warn(`quiet-window: failed to start: ${e.message}`); }
-
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -188,7 +181,6 @@ async function main() {
     // that the freshly-restarted replica then races (the H-4 orphan race).
     const finalize = async (reason) => {
       try { saveAccountsSync(); } catch {}
-      try { stopQuietWindowAutoUpdate(); } catch {}
       try { await stopLanguageServerAndWait({ perProcessTimeoutMs: 1500 }); }
       catch { try { stopLanguageServer(); } catch {} }
       log.info(`Shutdown complete (${reason})`);

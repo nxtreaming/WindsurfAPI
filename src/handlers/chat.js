@@ -13,7 +13,6 @@ import { config, log } from '../config.js';
 import { safeAccountRef, safeKeyRef } from '../log-safety.js';
 import { recordRequest, recordTokenUsage, recordPolicyBlocked, recordRateLimited } from '../dashboard/stats.js';
 import { extractIntentFromNarrative, detectToolIntentInNarrative } from './intent-extractor.js';
-import { markRequest as markQuietWindowRequest } from '../dashboard/quiet-window-updater.js';
 import { isModelAllowed } from '../dashboard/model-access.js';
 import { cacheKey, cacheGet, cacheSet } from '../cache.js';
 import { isExperimentalEnabled } from '../runtime-config.js';
@@ -1919,11 +1918,6 @@ export async function handleChatCompletions(body, context = {}) {
 
 async function _handleChatCompletionsInner(body, context = {}) {
   const reqId = Math.random().toString(36).slice(2, 8);
-  // v2.0.67 (#112): feed the quiet-window auto-updater. Cheap (one
-  // timestamp push); covers /v1/chat/completions, /v1/messages and
-  // /v1/responses since both messages.js and responses.js go through
-  // handleChatCompletions.
-  markQuietWindowRequest();
   const {
     stream = false,
     tools,
@@ -2121,11 +2115,19 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // rewrite BEFORE the connect call so no role:'tool' message survives to
     // devin-connect.js's non-protocol [tool result] text wrapper.
     // fable-tier guard: fable's backend hard-fails (UPSTREAM_INTERNAL → breaker →
-    // 529) above ~9 tools. Clients like Claude Code send 30. Intelligently trim to
-    // the weak-model limit (keeps tool_choice-forced + top agent primitives) so
-    // the request is one fable can actually serve. No-op for non-weak models and
-    // for lists already within the limit. Env: WINDSURFAPI_WEAK_MODEL_TOOL_LIMIT.
-    const _trim = trimToolsForWeakModel(effectiveTools, reqModelName, { toolChoice: tool_choice });
+    // 529) above ~9 tools ON THE PROMPT-EMULATION PATH. Clients like Claude Code
+    // send 30. Intelligently trim to the weak-model limit (keeps tool_choice-forced
+    // + top agent primitives). No-op for non-weak models and lists within the limit.
+    // Env: WINDSURFAPI_WEAK_MODEL_TOOL_LIMIT.
+    // NATIVE-PATH EXEMPTION: paid test (2026-07-08) confirmed the native protobuf
+    // tool path (nativeToolCall flag) does NOT hit the emulation empty-reply /
+    // tool-count ceiling — fable ran clean with tools on the native wire. So when
+    // the flag is on, skip the trim and let weak models get the FULL tool set;
+    // the trim was a prompt-emulation workaround, not a native-path need.
+    const nativeToolFlag = isExperimentalEnabled('nativeToolCall');
+    const _trim = nativeToolFlag
+      ? { tools: effectiveTools, trimmed: false, kept: Array.isArray(effectiveTools) ? effectiveTools.length : 0, dropped: 0 }
+      : trimToolsForWeakModel(effectiveTools, reqModelName, { toolChoice: tool_choice });
     const connectTools = _trim.tools;
     if (_trim.trimmed) log.warn(`Chat[${reqId}]: DEVIN_CONNECT weak model ${reqModelName} — trimmed tools ${effectiveTools.length}→${_trim.kept} (dropped ${_trim.dropped}) to avoid upstream overload`);
     const emulateTools = Array.isArray(connectTools) && connectTools.length > 0;
@@ -2140,8 +2142,13 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // If only the def gate is on, the response still comes back as <tool_call>
     // markup, so the preamble's protocol instructions MUST stay. role:tool /
     // assistant history folding always runs (still needed until the msg gate lands).
-    const nativeDefsOn = emulateTools && !!getToolDefTags();
-    const nativeCallsOn = !!parseToolCallTagMap();
+    // nativeToolCall flag: when on, an unset env falls back to the VERIFIED tag
+    // constants (useDefault) so the calibrated wire is the default — else the gate
+    // only fires on an explicit env override (legacy behavior). Flag default OFF
+    // (runtime-config) keeps prompt emulation untouched until a paid probe confirms.
+    const nativeFlag = nativeToolFlag; // hoisted above the tool-trim (same request)
+    const nativeDefsOn = emulateTools && !!getToolDefTags(process.env, { useDefault: nativeFlag });
+    const nativeCallsOn = !!parseToolCallTagMap(process.env, { useDefault: nativeFlag });
     // SOLO calibration mode (DEVIN_CONNECT_TOOL_DEF_SOLO=1, default OFF): force the
     // preamble OFF whenever the def gate is on, so native #10 tool defs are the
     // ONLY tool signal reaching the upstream. This is the black-box probe for the
@@ -2152,8 +2159,13 @@ async function _handleChatCompletionsInner(body, context = {}) {
     const soloProbe = nativeDefsOn && String(process.env.DEVIN_CONNECT_TOOL_DEF_SOLO || '') === '1';
     const suppressPreamble = soloProbe || (nativeDefsOn && nativeCallsOn);
     if (soloProbe) log.info(`Chat[${reqId}]: DEVIN_CONNECT TOOL_DEF SOLO probe — preamble suppressed, native #10 is the only tool signal`);
+    // Native tool_call observability: surface gate state so a paid probe can
+    // confirm the native path actually engaged (flag on + tags resolved) vs
+    // silently falling back to prompt emulation.
+    if (emulateTools) log.info(`Chat[${reqId}]: TOOLCALL nativeFlag=${nativeFlag} defsOn=${nativeDefsOn} callsOn=${nativeCallsOn} suppressPreamble=${suppressPreamble} mode=${(nativeDefsOn && nativeCallsOn) ? 'NATIVE' : 'emulation'}`);
+    const nativeStructured = nativeDefsOn && nativeCallsOn;
     const connectMessages = emulateTools
-      ? normalizeMessagesForCascade(messages, connectTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble, stripOrphans: nativeDefsOn })
+      ? normalizeMessagesForCascade(messages, connectTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble, stripOrphans: nativeDefsOn, nativeStructured })
       : messages;
     log.info(`Chat[${reqId}]: DEVIN_CONNECT ${reqModelName} -> selector=${selector}${mapped ? '' : ' [unmapped→free-tier]'} stream=${!!stream}${emulateTools ? ` tools=${connectTools.length}` : ''}`);
     const ccId = genId();
@@ -2214,6 +2226,9 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // until then this is inert and tools continue to ride the prompt (emulateTools).
     // Forwarding is harmless when the tag map is unset — the encoder ignores it.
     if (Array.isArray(connectTools) && connectTools.length) connectParams.tools = connectTools;
+    // Native tool_call flag: forward so streamChat/buildGetChatMessageRequest fall
+    // back to the VERIFIED tag constants when no explicit env override is set.
+    if (nativeFlag) connectParams.nativeToolCall = true;
     // Router-model hop (opt-in, default OFF). `adaptive`/`arena-*` are not real
     // model_uids — the server resolves them per request via the AssignModel RPC,
     // and GetChatMessage rejects the bare router uid. When DEVIN_CONNECT_ASSIGN_MODEL=1

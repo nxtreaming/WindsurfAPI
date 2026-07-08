@@ -80,7 +80,6 @@
     "reset": "重置",
     "clearPool": "清空对话池",
     "refresh": "刷新",
-    "runNow": "立即测试",
     "probe": "探测",
     "probeTitle": "探测能力",
     "enable": "启用",
@@ -102,7 +101,16 @@
     "invert": "反选",
     "showPassword": "显示/隐藏密码",
     "revealKey": "点击显示并复制完整 API Key",
-    "importLocal": "从本地 Windsurf 导入"
+    "importLocal": "从本地 Windsurf 导入",
+    "importLocalTitle": "从本地 Windsurf 客户端读取已登录的凭证（仅本机访问）",
+    "updateLsBinaryTitle": "下载最新 language_server 二进制并重启实例池",
+    "switchLang": "切换语言",
+    "prev": "上一页",
+    "next": "下一页"
+  },
+  "reveal": {
+    "confirmPrompt": "重新输入 Dashboard 密码以揭示此 Key(若未设 Dashboard 密码则输入 API Key):",
+    "wrongPassword": "二次验证失败——密码错误,未揭示 Key。"
   },
   "status": {
     "active": "正常",
@@ -180,6 +188,10 @@
     "noResetTime": "重置时间未知"
   },
   "section": {
+    "nativeBridge": {
+      "title": "Native Bridge",
+      "desc": "路由决策与灰度门可见性"
+    },
     "banStatus": {
       "title": "健康状态",
       "desc": "因错误、封禁或限流被标记的账号"
@@ -190,7 +202,7 @@
     },
     "oauthLogin": {
       "title": "快捷登录（推荐）",
-      "desc": "用你的 Google 或 GitHub 账号直接登录 Windsurf 无需密码"
+      "desc": "点按钮打开 Windsurf 官方登录页 用 Google/GitHub 登录后 复制返回的 Token 即可添加账号"
     },
     "emailLogin": {
       "title": "邮箱密码登录",
@@ -208,6 +220,16 @@
       "title": "添加账号",
       "desc": "支持 API Key 或 Auth Token 两种方式",
       "hint": "推荐用 Token 方式添加账号 点 {{link}} 登录后复制 Token 粘贴到下面就行 所有登录方式（邮箱/Google/GitHub）都能用"
+    },
+    "smartImport": {
+      "title": "智能导入",
+      "desc": "粘贴即识别,支持批量。自动识别 Session Token / Auth1 / Firebase Refresh / 邮箱密码 / 标签配对,可混合。",
+      "placeholder": "devin-session-token$...  或  auth1_...  或  email----password  每行一个,可混合",
+      "button": "智能导入",
+      "empty": "先粘贴一些 token 或账号",
+      "importing": "导入中…",
+      "result": "已添加 {{added}} · 跳过 {{skipped}} · 失败 {{failed}}",
+      "done": "成功导入 {{added}} 个账号"
     },
     "accountList": {
       "title": "账号列表",
@@ -263,13 +285,9 @@
       "title": "配额低水位时屏蔽 premium 模型",
       "desc": "所有账号本周配额都低于 5% 时，对 premium 模型（claude-opus / claude-sonnet 等）请求直接返 503，避免上游 rate-limit 烧最后一点配额。免费层模型（gemini-2.5-flash 等）保持可用。关闭后即使在 drought mode 也照常下发，accept 上游可能立即 429。",
       "enable": "启用 drought-mode premium 屏蔽",
-      "hint": "默认开启。drought 状态由账号池自动判定（GET /dashboard/api/drought 看实时值）。"
-    },
-    "quietWindow": {
-      "title": "空档自动更新",
-      "desc": "每分钟看一次最近 5 分钟内的请求量，连续在阈值以下就自动 docker compose pull + recreate。冷启动 10 分钟内不动；成功后 24 小时冷却；失败不冷却。需要 /var/run/docker.sock 挂进容器（默认 docker-compose 已挂）。",
-      "enable": "启用空档自动更新",
-      "hint": "默认关闭。当前状态："
+      "hint": "默认开启。drought 状态由账号池自动判定（GET /dashboard/api/drought 看实时值）。",
+      "thresholdLabel": "Drought 阈值（本周配额 %）",
+      "thresholdHint": "账号本周配额低于此值即计入 drought"
     },
     "stickyByUser": {
       "title": "粘性会话按用户绑定",
@@ -282,6 +300,18 @@
       "desc": "开启后，粘性会话绑定的账号如果遇到限流/错误/模型不可用，不会自动切换到账号池中的其他账号，而是直接将错误返回给客户端。这样可以确保每个 user 严格只消耗自己绑定账号的额度。需启用 STICKY_SESSION_ENABLED=1 才生效。",
       "enable": "禁止账号回退",
       "hint": "默认关闭。开启后绑定账号失败时不会切换到其他账号消耗额度。"
+    },
+    "nativeToolCall": {
+      "title": "原生 tool_call",
+      "desc": "开启后工具定义走原生 protobuf 线协议（已标定的 #10 ToolDef + #6 ChatToolCall），而非提示词模拟（<tool_call> 文本标记）。原生路对弱模型（fable）多工具更稳、不受提示词模拟的空回复限制。关闭则回退到提示词模拟（当前默认稳定路径）。",
+      "enable": "启用原生 tool_call",
+      "hint": "默认关闭。开启前建议先对付费号发一发带工具的请求验证闭环。"
+    },
+    "preflight": {
+      "title": "发送前预检配额",
+      "desc": "每次 chat 前先探一次 server.codeium.com 剩余配额,无额度账号直接快速失败,避免烧上游 429。代价是每请求多一次网络往返。",
+      "enable": "启用发送前预检",
+      "hint": "默认关闭。会增加延迟;账号频繁耗尽时再开。"
     },
     "skin": {
       "title": "界面风格",
@@ -550,6 +580,13 @@
         "output": "输出"
       }
     },
+    "credits": {
+      "title": "Credits 花销",
+      "unit": "credits",
+      "byModel": "按模型花销",
+      "subtitle": "今日消耗 {{today}} credits",
+      "empty": "暂无消耗数据"
+    },
     "banStats": {
       "title": "健康概览"
     },
@@ -605,6 +642,7 @@
     "custom": "已自定义"
   },
   "login": {
+    "releaseNotes": "v{{version}} 版本说明",
     "title": "控制台登录",
     "subtitle": "请输入管理密码以继续",
     "passwordPlaceholder": "Dashboard 密码",
@@ -703,8 +741,6 @@
     "clearPoolDesc": "当前所有进行中的 Cascade 会话都将被清除，确定继续吗？",
     "clearProxyTitle": "清除全局代理",
     "clearProxyDesc": "在重新设置代理前，所有出站请求将直连。确定继续吗？",
-    "quietWindowRunTitle": "立即执行静默窗口更新",
-    "quietWindowRunDesc": "这会触发真实的 Docker 镜像拉取与容器重建 — 服务将重启，执行中不可逆。确定继续吗？",
     "switchSkinTitle": "切换仪表盘皮肤",
     "switchSkinDesc": "仪表盘将重新加载以应用新皮肤。确定继续吗？",
     "expToggleDesc": "这会立即改变实时路由行为。确定继续吗？"
@@ -764,6 +800,9 @@
     "openWindsurfToken": "打开 windsurf.com 拿 Token",
     "tokenPlaceholder": "粘贴 Auth Token...",
     "addWithToken": "用 Token 添加",
+    "step2Title": "② 粘贴 Windsurf 返回的 Token",
+    "step2Desc": "在新标签完成登录后 页面会显示一串 Token 复制粘到这里点添加",
+    "openManually": "登录页没弹出来？点这里手动打开",
     "status": {
       "loading": "正在通过 {{provider}} 登录...",
       "success": "登录成功 {{email}} 已加入账号池",
@@ -773,6 +812,9 @@
       "codeiumRegistering": "{{label}} 认证成功 正在注册 Codeium...",
       "loginSuccess": "登录成功 {{email}} 已加入账号池",
       "loginFailed": "{{label}} 登录失败: {{error}}",
+      "opened": "已在新标签打开 Windsurf {{label}} 登录页 完成登录后复制 Token 粘到下方",
+      "popupBlocked": "浏览器拦截了弹窗 请用下方链接手动打开登录页",
+      "adding": "正在添加账号...",
       "originBlocked": "{{label}} OAuth 被 Firebase 拒绝了当前 Dashboard 来源。请从 windsurf.com/show-auth-token 复制 Auth Token 后在账号管理里添加。"
     }
   },
@@ -817,7 +859,28 @@
     "importSuccess": "已导入 {{email}}",
     "unavailable": "此功能仅在 localhost 部署可用 — 远端服务器上的 \"本地 Windsurf\" 是别人电脑上的，不是你电脑里的。"
   },
+  "accounts": {
+    "tierFilter": {
+      "title": "按层级筛选",
+      "all": "全部层级",
+      "pro": "Pro",
+      "free": "Free",
+      "unknown": "未知",
+      "expired": "已过期"
+    },
+    "density": {
+      "title": "切换紧凑 / 宽松密度",
+      "label": "紧凑"
+    },
+    "export": {
+      "title": "导出全部账号（仅元数据，不含密钥）",
+      "label": "导出",
+      "done": "已导出 {{count}} 个账号",
+      "failed": "导出失败"
+    }
+  },
   "account": {
+    "tierManualBadge": "手动",
     "addSuccess": "账号已添加",
     "deleteSuccess": "账号已删除",
     "enableSuccess": "账号已启用",
@@ -906,20 +969,6 @@
     "fileLoaded": "已选择文件：{{name}}",
     "fileReadFailed": "读取文件失败：{{error}}"
   },
-  "quietWindow": {
-    "status": {
-      "disabled": "已关闭",
-      "coldStart": "冷启动 grace 中",
-      "cooldown": "冷却中",
-      "busy": "繁忙（请求多）",
-      "eligible": "空档·可触发"
-    },
-    "never": "从未",
-    "lastUpdate": "上次更新",
-    "loadFailed": "加载失败",
-    "triggered": "已触发",
-    "triggerFailed": "触发失败"
-  },
   "otp": {
     "codeSent": "验证码已发送，请查收邮件。"
   },
@@ -938,6 +987,7 @@
     "enterHostPort": "请先填主机和端口",
     "experimentalEnabled": "已启用实验性功能",
     "experimentalDisabled": "已关闭实验性功能",
+    "droughtThresholdSaved": "Drought 阈值已保存：{{value}}%",
     "toggleFailed": "切换失败：{{error}}",
     "modeUpdated": "模式已更新",
     "defaultModelUpdated": "默认模型已更新",
@@ -1098,6 +1148,9 @@
     "langToggleToEn": "Switch to English",
     "langToggleToZh": "切换到中文"
   },
+  "theme": {
+    "toggle": "切换深浅模式"
+  },
   "placeholder": {
     "noProxy": "无代理"
   },
@@ -1167,6 +1220,7 @@
       "transientReplays": "瞬态重放",
       "livenessRecovered": "存活恢复",
       "credDecryptFail": "凭证解密失败",
+      "silentOk": "正常",
       "empty": "暂无连接指标"
     },
     "rankings": {

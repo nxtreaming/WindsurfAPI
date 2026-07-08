@@ -920,6 +920,11 @@ export function normalizeMessagesForCascade(messages, tools, options = {}) {
   // tool_choice through so required/forced constraints reach the prompt;
   // the Cascade path can keep passing nothing and stays on 'auto'.
   const toolChoice = options.toolChoice ?? 'auto';
+  // Native structured mode (nativeToolCall): keep assistant.tool_calls and
+  // role:'tool' messages UNCHANGED so devin-connect.js can encode them as native
+  // #6 ChatToolCall / role=4 tool_result. Without this they'd be folded to text
+  // markup (emulation), losing native fidelity on multi-turn history.
+  const nativeStructured = options.nativeStructured === true;
   const dialect = pickToolDialect(modelKey, provider, route);
   const out = [];
 
@@ -927,6 +932,7 @@ export function normalizeMessagesForCascade(messages, tools, options = {}) {
     if (!m || !m.role) { out.push(m); continue; }
 
     if (m.role === 'tool') {
+      if (nativeStructured) { out.push(m); continue; } // keep structured for native #7 tool_result
       const id = sanitizeToolCallId(m.tool_call_id);
       const rawContent = typeof m.content === 'string'
         ? m.content
@@ -940,6 +946,7 @@ export function normalizeMessagesForCascade(messages, tools, options = {}) {
     }
 
     if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      if (nativeStructured) { out.push(m); continue; } // keep structured for native #6 encode
       const parts = [];
       if (m.content) parts.push(typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
       // Serialize past tool_calls back into the cascade history using the

@@ -18,11 +18,11 @@ import {
 } from '../auth.js';
 import { restartLsForProxy } from '../langserver.js';
 import { getLsStatus, stopLanguageServerAndWait, startLanguageServer, isLanguageServerRunning, getLsAdmissionStatus } from '../langserver.js';
-import { getStats, resetStats, recordRequest } from './stats.js';
+import { getStats, resetStats, recordRequest, exportStats, importStats } from './stats.js';
 import { getConnectMetrics, resetConnectMetrics } from '../devin-connect-metrics.js';
 import { cacheStats, cacheClear } from '../cache.js';
 import {
-  getExperimental, setExperimental, getSystemPrompts, setSystemPrompts, resetSystemPrompt,
+  getExperimental, setExperimental, getTunables, setTunables, getSystemPrompts, setSystemPrompts, resetSystemPrompt,
   getCredentials, setRuntimeApiKey, setRuntimeDashboardPassword,
   verifyPassword, getEffectiveApiKey, getEffectiveDashboardPasswordStored,
 } from '../runtime-config.js';
@@ -38,13 +38,9 @@ import { getNativeBridgeStats } from '../native-bridge-stats.js';
 import { assertPublicUrlHost } from '../image.js';
 import { validateHostFormat } from '../net-safety.js';
 import { discoverWindsurfCredentials, isLoopbackAddress } from './local-windsurf.js';
+import { parseAccountText, classifyToken } from './account-text-parser.js';
 import { detectDockerSelfUpdate, runDockerSelfUpdate } from './docker-self-update.js';
 import { BatchImportParseError, parseBatchImportInput } from './import-parser.js';
-import {
-  getStatus as getQuietWindowStatus,
-  setEnabled as setQuietWindowEnabled,
-  _runOneTick as runQuietWindowTickNow,
-} from './quiet-window-updater.js';
 
 function shouldPrewarmLsOnAccountAdd() {
   return process.env.LS_PREWARM_ON_ACCOUNT_ADD === '1' || process.env.LS_PREWARM_PROXIES === '1';
@@ -179,7 +175,7 @@ function parseBoundedInt(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEG
 function getAccountsPayload(req) {
   const url = dashboardUrl(req);
   const qs = url.searchParams;
-  const wantsPaged = qs.has('page') || qs.has('pageSize') || qs.has('offset') || qs.has('limit') || qs.has('view') || qs.has('filter');
+  const wantsPaged = qs.has('page') || qs.has('pageSize') || qs.has('offset') || qs.has('limit') || qs.has('view') || qs.has('filter') || qs.has('tier');
   if (!wantsPaged) return { accounts: getAccountList() };
 
   const view = qs.get('view') === 'summary' ? 'summary' : 'full';
@@ -190,9 +186,12 @@ function getAccountsPayload(req) {
     : null;
   const offset = explicitOffset ?? ((page - 1) * pageSize);
   const filter = qs.get('filter') === 'flagged' ? 'flagged' : '';
+  const tier = ['pro', 'free', 'unknown', 'expired'].includes(qs.get('tier')) ? qs.get('tier') : '';
   const stats = getAccountListStats();
-  const total = filter === 'flagged' ? stats.flagged : stats.total;
-  const accounts = getAccountList({ view, offset, limit: pageSize, filter });
+  const total = filter === 'flagged'
+    ? stats.flagged
+    : (tier ? (stats.byTier?.[tier] ?? 0) : stats.total);
+  const accounts = getAccountList({ view, offset, limit: pageSize, filter, tier });
   return {
     accounts,
     page,
@@ -202,6 +201,7 @@ function getAccountsPayload(req) {
     hasMore: offset + accounts.length < total,
     view,
     filter,
+    tier,
     stats,
   };
 }
@@ -426,14 +426,22 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
 
   // ─── Experimental features ────────────────────────────
   if (subpath === '/experimental' && method === 'GET') {
-    return json(res, 200, { flags: getExperimental(), conversationPool: convPoolStats() });
+    return json(res, 200, { flags: getExperimental(), tunables: getTunables(), conversationPool: convPoolStats() });
   }
   if (subpath === '/experimental' && method === 'PUT') {
-    const flags = setExperimental(body || {});
+    // Numeric tunables (e.g. droughtThresholdPercent) ride the same endpoint
+    // but must NOT go through setExperimental, which coerces every key to bool.
+    const patch = { ...(body || {}) };
+    let tunables;
+    if (patch.tunables && typeof patch.tunables === 'object') {
+      tunables = setTunables(patch.tunables);
+    }
+    delete patch.tunables;
+    const flags = setExperimental(patch);
     // Dropping the toggle should also drop any live entries so nothing
     // resumes against a disabled feature on the next request.
     if (!flags.cascadeConversationReuse) convPoolClear();
-    return json(res, 200, { success: true, flags });
+    return json(res, 200, { success: true, flags, tunables: tunables ?? getTunables() });
   }
   if (subpath === '/experimental/conversation-pool' && method === 'DELETE') {
     const n = convPoolClear();
@@ -464,27 +472,6 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
       return json(res, 200, { ok: true, ...result, latencyMs: Date.now() - startTime });
     } catch (err) {
       return json(res, 200, { ok: false, error: err.message, latencyMs: Date.now() - startTime });
-    }
-  }
-
-  // ─── v2.0.67 (#112) — Quiet-window auto-update ────────
-  if (subpath === '/auto-update/quiet-window' && method === 'GET') {
-    return json(res, 200, { ok: true, ...getQuietWindowStatus() });
-  }
-  if (subpath === '/auto-update/quiet-window' && method === 'PUT') {
-    const enabled = !!body?.enabled;
-    return json(res, 200, { ok: true, ...setQuietWindowEnabled(enabled) });
-  }
-  if (subpath === '/auto-update/quiet-window/run' && method === 'POST') {
-    // Force one tick now (operator wants to test the path without
-    // waiting for the next minute boundary). Honours the same gates as
-    // the periodic tick — disabled / cold-start / cooldown / busy will
-    // still short-circuit.
-    try {
-      const result = await runQuietWindowTickNow();
-      return json(res, 200, { ok: true, result });
-    } catch (e) {
-      return json(res, 500, { ok: false, error: e.message });
     }
   }
 
@@ -700,7 +687,40 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
     }
   }
 
-  // GET /accounts/import-local-availability — v2.0.60: cheap probe so the
+  // POST /accounts/import-text — smart bulk import. Paste mixed token formats
+  // (session / auth1 / refresh-JWT / labeled pairs); the parser classifies each
+  // and adds via the existing addAccountByToken flow. SECURITY: never logs the
+  // pasted text or any token; results carry only id/email/kind, never raw token.
+  if (subpath === '/accounts/import-text' && method === 'POST') {
+    try {
+      const text = String(body.text || '');
+      if (!text.trim()) return json(res, 400, { error: 'ERR_IMPORT_TEXT_EMPTY' });
+      const parsed = parseAccountText(text);
+      const results = { added: [], skipped: [], failed: [] };
+      for (const raw of (parsed.tokens || [])) {
+        const kind = classifyToken(raw);
+        if (kind === 'unknown') { results.skipped.push({ kind, reason: 'unclassified' }); continue; }
+        try {
+          const acc = await addAccountByToken(raw, '');
+          results.added.push({ id: acc.id, email: acc.email, kind });
+        } catch (e) { results.failed.push({ kind, error: e.message }); }
+      }
+      for (const pair of (parsed.tokenPairs || [])) {
+        try {
+          const acc = await addAccountByToken(pair.token, pair.email || '');
+          results.added.push({ id: acc.id, email: acc.email || pair.email, kind: classifyToken(pair.token) });
+        } catch (e) { results.failed.push({ email: pair.email, error: e.message }); }
+      }
+      // Email/password accounts need the login flow (batch 2+); record as skipped.
+      for (const a of (parsed.accounts || [])) {
+        results.skipped.push({ kind: 'email_password', email: a.email, reason: 'use_login_flow' });
+      }
+      return json(res, 200, { success: true, ...results, ...getAccountCount() });
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+  }
+
   // dashboard can hide / disable the "Import from local Windsurf" button on
   // public binds *before* the user clicks it. Returns the same gates the
   // import endpoint enforces, plus a friendly explanation.
@@ -870,6 +890,21 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
   if (subpath === '/stats' && method === 'DELETE') {
     resetStats();
     return json(res, 200, { success: true });
+  }
+
+  // v2.0.148 — export the full stats snapshot (credits + per-request detail) for
+  // backup/migration. GET returns JSON the client can download as a file.
+  if (subpath === '/stats/export' && method === 'GET') {
+    return json(res, 200, exportStats());
+  }
+
+  // v2.0.148 — import a previously exported snapshot. Body: the snapshot object,
+  // optional { mode: 'merge'|'replace' } (default merge). Merge sums counts.
+  if (subpath === '/stats/import' && method === 'POST') {
+    const mode = body && body.mode === 'replace' ? 'replace' : 'merge';
+    const snap = body && body.snapshot ? body.snapshot : body;
+    const result = importStats(snap, { mode });
+    return json(res, result.ok ? 200 : 400, result);
   }
 
   // DEVIN_CONNECT recovery health: re-login / failover / dead-token / cooldown

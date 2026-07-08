@@ -170,3 +170,41 @@ async function buildFixtureDb() {
   db.close();
   return fixturePath;
 }
+
+describe('extractFromDevinCli (v2.0.148)', () => {
+  it('parses windsurf_api_key + api_server_url from a flat credentials.toml', async () => {
+    const { extractFromDevinCli } = await import('../src/dashboard/local-windsurf.js');
+    const fs = await import('node:fs');
+    const osm = await import('node:os');
+    const pth = await import('node:path');
+    const dir = fs.mkdtempSync(pth.join(osm.tmpdir(), 'devin-cli-test-'));
+    const f = pth.join(dir, 'credentials.toml');
+    fs.writeFileSync(f, 'windsurf_api_key = "devin-session-token$FAKE.JWT.SIG"\napi_server_url = "https://server.codeium.com"\ndevin_webapp_host = "app.devin.ai"\n');
+    const r = await extractFromDevinCli(f);
+    assert.equal(r.ok, true);
+    assert.equal(r.account.apiKey, 'devin-session-token$FAKE.JWT.SIG');
+    assert.equal(r.account.apiServerUrl, 'https://server.codeium.com');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns not_found for a missing file', async () => {
+    const { extractFromDevinCli } = await import('../src/dashboard/local-windsurf.js');
+    const r = await extractFromDevinCli('/no/such/credentials.toml');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not_found');
+  });
+
+  it('returns no_token when windsurf_api_key is absent', async () => {
+    const { extractFromDevinCli } = await import('../src/dashboard/local-windsurf.js');
+    const fs = await import('node:fs');
+    const osm = await import('node:os');
+    const pth = await import('node:path');
+    const dir = fs.mkdtempSync(pth.join(osm.tmpdir(), 'devin-cli-test-'));
+    const f = pth.join(dir, 'credentials.toml');
+    fs.writeFileSync(f, 'api_server_url = "https://server.codeium.com"\n');
+    const r = await extractFromDevinCli(f);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'no_token');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
