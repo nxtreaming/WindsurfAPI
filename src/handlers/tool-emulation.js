@@ -87,6 +87,82 @@ export function isWeakEmulationModel(modelKey = '') {
   return /^claude-5-fable(?:[-.]|$)/i.test(String(modelKey || ''));
 }
 
+// fable's upstream backend hard-fails (UPSTREAM_INTERNAL / overloaded_error) when
+// a request carries more than ~9 tool definitions — CONFIRMED by capture on
+// 2026-07-08: Claude Code sends 30 tools → every turn returns
+// "an internal error occurred (trace ID …)" which then trips the breaker → 529.
+// This is a HARD upstream capacity ceiling, not the earlier (disproven) empty-reply
+// theory, so retry cannot heal it — the only fix is to cap the tool count before
+// the request leaves the proxy. Default 8 (the stable ceiling; 9 wobbles).
+export function weakModelToolLimit(env = process.env) {
+  const raw = Number(env.WINDSURFAPI_WEAK_MODEL_TOOL_LIMIT);
+  return Number.isFinite(raw) && raw > 0 ? raw : 8;
+}
+
+// Priority ranking for the intelligent trim: when we must drop tools, keep the
+// ones an agent loop most needs. Lower rank = kept first. Names are matched
+// case-insensitively against a small set of well-known agent primitives; anything
+// unlisted sorts after these but before nothing (stable order preserved within a
+// tier so the caller's original ordering breaks ties).
+const WEAK_TOOL_PRIORITY = [
+  'read', 'edit', 'write', 'bash', 'str_replace_editor', 'str_replace_based_edit_tool',
+  'grep', 'glob', 'ls', 'search', 'list_files', 'view',
+  'task', 'todowrite', 'todo_write',
+];
+function weakToolRank(name) {
+  const n = String(name || '').toLowerCase();
+  const i = WEAK_TOOL_PRIORITY.findIndex((p) => n === p || n.includes(p));
+  return i === -1 ? WEAK_TOOL_PRIORITY.length : i;
+}
+
+/**
+ * Intelligently trim a tool list down to what a weak model (fable) can handle.
+ * Returns the ORIGINAL array untouched when trimming isn't needed (not a weak
+ * model, or already within the limit). Otherwise keeps, in order:
+ *   1. any tool named by an explicit tool_choice (must never be dropped, or the
+ *      forced call becomes impossible),
+ *   2. the highest-priority agent primitives (read/edit/write/bash/…),
+ *   3. remaining tools in their original order,
+ * capped at the limit. Pure function — no mutation of the input array/objects.
+ *
+ * @param {Array} tools           OpenAI/Anthropic-shaped tool defs
+ * @param {string} modelKey       requested model
+ * @param {object} [opts]
+ * @param {any} [opts.toolChoice] the request's tool_choice (name is force-kept)
+ * @param {object} [opts.env]
+ * @returns {{ tools: Array, trimmed: boolean, kept: number, dropped: number }}
+ */
+export function trimToolsForWeakModel(tools, modelKey, opts = {}) {
+  const env = opts.env || process.env;
+  if (!Array.isArray(tools) || !isWeakEmulationModel(modelKey)) {
+    return { tools, trimmed: false, kept: Array.isArray(tools) ? tools.length : 0, dropped: 0 };
+  }
+  const limit = weakModelToolLimit(env);
+  if (tools.length <= limit) {
+    return { tools, trimmed: false, kept: tools.length, dropped: 0 };
+  }
+  const nameOf = (t) => (t && t.function && t.function.name) || t?.name || '';
+  // Force-keep a tool_choice-named tool.
+  let forced = null;
+  const tc = opts.toolChoice;
+  if (tc && typeof tc === 'object') {
+    forced = tc.function?.name || tc.name || null;
+  }
+  // Decorate with original index so the sort is stable within a priority tier.
+  const decorated = tools.map((t, i) => ({ t, i, rank: weakToolRank(nameOf(t)), forced: forced && nameOf(t) === forced }));
+  decorated.sort((a, b) => {
+    if (a.forced !== b.forced) return a.forced ? -1 : 1;   // forced first
+    if (a.rank !== b.rank) return a.rank - b.rank;          // priority tier
+    return a.i - b.i;                                       // original order
+  });
+  const keptDecorated = decorated.slice(0, limit);
+  // Restore original request order among the kept tools (agents don't care, but
+  // it keeps the wire stable/diffable and avoids surprising the model).
+  keptDecorated.sort((a, b) => a.i - b.i);
+  const kept = keptDecorated.map((d) => d.t);
+  return { tools: kept, trimmed: true, kept: kept.length, dropped: tools.length - kept.length };
+}
+
 export function buildToolPreamble(tools, toolChoice = 'auto', modelKey = null, provider = null, route = null) {
   if (!Array.isArray(tools) || tools.length === 0) return '';
   const dialect = pickToolDialect(modelKey, provider, route);

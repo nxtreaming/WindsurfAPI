@@ -26,6 +26,7 @@ import {
   normalizeMessagesForCascade, ToolCallStreamParser, parseToolCallsFromText, stripToolMarkupFromText,
   buildToolPreambleForProto, buildCompactToolPreambleForProto,
   buildSchemaCompactToolPreambleForProto, buildSkinnyToolPreambleForProto,
+  trimToolsForWeakModel,
 } from './tool-emulation.js';
 import {
   getNativeBridgeDecision, buildReverseLookup,
@@ -2119,7 +2120,15 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // (toChatCompletion / streamChatCompletion with emulateTools). Run the
     // rewrite BEFORE the connect call so no role:'tool' message survives to
     // devin-connect.js's non-protocol [tool result] text wrapper.
-    const emulateTools = Array.isArray(effectiveTools) && effectiveTools.length > 0;
+    // fable-tier guard: fable's backend hard-fails (UPSTREAM_INTERNAL → breaker →
+    // 529) above ~9 tools. Clients like Claude Code send 30. Intelligently trim to
+    // the weak-model limit (keeps tool_choice-forced + top agent primitives) so
+    // the request is one fable can actually serve. No-op for non-weak models and
+    // for lists already within the limit. Env: WINDSURFAPI_WEAK_MODEL_TOOL_LIMIT.
+    const _trim = trimToolsForWeakModel(effectiveTools, reqModelName, { toolChoice: tool_choice });
+    const connectTools = _trim.tools;
+    if (_trim.trimmed) log.warn(`Chat[${reqId}]: DEVIN_CONNECT weak model ${reqModelName} — trimmed tools ${effectiveTools.length}→${_trim.kept} (dropped ${_trim.dropped}) to avoid upstream overload`);
+    const emulateTools = Array.isArray(connectTools) && connectTools.length > 0;
     // Double-send guard (#49): when the native ToolDef gate is calibrated, tools
     // also ride natively in the #10 `tools` field (connectParams.tools below), so
     // re-describing them in the prompt preamble is redundant and gives the model
@@ -2144,9 +2153,9 @@ async function _handleChatCompletionsInner(body, context = {}) {
     const suppressPreamble = soloProbe || (nativeDefsOn && nativeCallsOn);
     if (soloProbe) log.info(`Chat[${reqId}]: DEVIN_CONNECT TOOL_DEF SOLO probe — preamble suppressed, native #10 is the only tool signal`);
     const connectMessages = emulateTools
-      ? normalizeMessagesForCascade(messages, effectiveTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble, stripOrphans: nativeDefsOn })
+      ? normalizeMessagesForCascade(messages, connectTools, { modelKey: reqModelName, provider: null, route: 'devin_connect', toolChoice: tool_choice, injectUserPreamble: !suppressPreamble, stripOrphans: nativeDefsOn })
       : messages;
-    log.info(`Chat[${reqId}]: DEVIN_CONNECT ${reqModelName} -> selector=${selector}${mapped ? '' : ' [unmapped→free-tier]'} stream=${!!stream}${emulateTools ? ` tools=${effectiveTools.length}` : ''}`);
+    log.info(`Chat[${reqId}]: DEVIN_CONNECT ${reqModelName} -> selector=${selector}${mapped ? '' : ' [unmapped→free-tier]'} stream=${!!stream}${emulateTools ? ` tools=${connectTools.length}` : ''}`);
     const ccId = genId();
     const ccCreated = Math.floor(Date.now() / 1000);
     const ccStart = Date.now();
@@ -2197,7 +2206,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // emits a real `tools` field when DEVIN_CONNECT_TOOL_DEF_TAGS is calibrated;
     // until then this is inert and tools continue to ride the prompt (emulateTools).
     // Forwarding is harmless when the tag map is unset — the encoder ignores it.
-    if (Array.isArray(effectiveTools) && effectiveTools.length) connectParams.tools = effectiveTools;
+    if (Array.isArray(connectTools) && connectTools.length) connectParams.tools = connectTools;
     // Router-model hop (opt-in, default OFF). `adaptive`/`arena-*` are not real
     // model_uids — the server resolves them per request via the AssignModel RPC,
     // and GetChatMessage rejects the bare router uid. When DEVIN_CONNECT_ASSIGN_MODEL=1
