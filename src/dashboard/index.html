@@ -442,6 +442,19 @@ code {
 .ns-btn:last-child { border-radius: 0 0 var(--radius-sm) 0; border-top: 1px solid var(--border); }
 .ns-input[disabled] ~ .ns-btns .ns-btn { opacity: .5; cursor: not-allowed; }
 
+/* Keyboard focus visibility for controls whose real input is opacity:0 (switch /
+   checkbox / segmented) plus nav + segmented buttons — otherwise keyboard users
+   have no visible focus. Mouse users are unaffected (:focus-visible only). */
+.switch input:focus-visible + .switch-slider,
+.checkbox input:focus-visible + .box,
+.segmented label:has(input:focus-visible) {
+  outline: none; box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent);
+}
+.sidebar nav a:focus-visible,
+.seg-btn:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .field-label {
   font-size: 12px;
@@ -553,6 +566,9 @@ thead th {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 thead th.th-help {
   cursor: help;
@@ -978,6 +994,9 @@ tbody tr:hover td { background: var(--surface-2); }
 }
 @media (max-width: 720px) {
   .native-bridge-decision { grid-template-columns: 1fr; }
+  /* Cockpit two-up sections stack on narrow screens so the trend chart and
+     connect metrics don't get crushed. */
+  .grid-2 { grid-template-columns: 1fr !important; }
 }
 
 /* ─── Model Chips ─────────────────────────────── */
@@ -3364,13 +3383,19 @@ docker compose up -d --force-recreate</pre>
     const t = document.createElement('div');
     t.className = 'toast ' + type;
     t.textContent = msg;
+    t.style.cursor = 'pointer';
+    t.title = I18n.t('toast.dismiss');
     document.getElementById('toast-stack').appendChild(t);
-    setTimeout(() => {
+    let done = false;
+    const dismiss = () => {
+      if (done) return; done = true;
       t.style.opacity = '0';
       t.style.transform = 'translateX(20px)';
       t.style.transition = 'all .2s';
       setTimeout(() => t.remove(), 200);
-    }, 3000);
+    };
+    t.addEventListener('click', dismiss);   // click to dismiss early
+    setTimeout(dismiss, 3000);
   },
 
   // ─── Modal helpers ───────────────────────────
@@ -5613,6 +5638,14 @@ docker compose up -d --force-recreate</pre>
       frag.appendChild(div);
     }
     container.innerHTML = '';
+    if (!frag.childNodes.length) {
+      const empty = document.createElement('div');
+      empty.className = 'log-empty';
+      empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;min-height:200px;color:var(--text-dim);font-size:13px;';
+      empty.textContent = (this.logEntries.length ? I18n.t('log.emptyFiltered') : I18n.t('log.empty'));
+      container.appendChild(empty);
+      return;
+    }
     container.appendChild(frag);
   },
 

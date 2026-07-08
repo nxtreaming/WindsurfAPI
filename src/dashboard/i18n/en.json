@@ -923,6 +923,7 @@
     "codeSent": "Verification code sent. Check your email."
   },
   "toast": {
+    "dismiss": "Click to dismiss",
     "copied": "Copied",
     "saved": "Saved",
     "cleared": "Cleared",
@@ -986,6 +987,8 @@
     }
   },
   "log": {
+    "empty": "No logs yet",
+    "emptyFiltered": "No logs match the current filter",
     "level": {
       "all": "All Levels",
       "debug": "Debug",
