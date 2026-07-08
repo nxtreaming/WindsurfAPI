@@ -406,19 +406,23 @@ code {
 .cs-trigger[aria-expanded="true"] .cs-chevron { transform: rotate(180deg); }
 .cs-pop {
   position: fixed; z-index: 150; min-width: 120px; max-height: 280px; overflow-y: auto;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow-lg); padding: 4px; transform-origin: top;
-  animation: modalIn .18s cubic-bezier(.16,1,.3,1);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); padding: 5px; transform-origin: top;
+  animation: modalIn .16s cubic-bezier(.16,1,.3,1);
 }
+.cs-pop::-webkit-scrollbar { width: 8px; }
+.cs-pop::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; border: 2px solid var(--surface); }
+.cs-pop::-webkit-scrollbar-track { background: transparent; }
 .cs-opt {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 8px 10px; font-size: 13px; color: var(--text-muted); border-radius: var(--radius-sm);
-  cursor: pointer; white-space: nowrap;
+  cursor: pointer; white-space: nowrap; transition: background .1s, color .1s;
 }
-.cs-opt[aria-selected="true"] { color: var(--text); }
+.cs-opt + .cs-opt { margin-top: 1px; }
+.cs-opt[aria-selected="true"] { color: var(--text); font-weight: 500; }
 .cs-opt.cs-hi { background: var(--accent-soft); color: var(--text); }
 .cs-opt[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
-.cs-opt .cs-check { color: var(--accent); flex-shrink: 0; opacity: 0; }
+.cs-opt .cs-check { color: var(--accent); flex-shrink: 0; opacity: 0; font-size: 12px; }
 .cs-opt[aria-selected="true"] .cs-check { opacity: 1; }
 
 /* ── Custom number stepper (enhances native input[type=number]) ── */
@@ -3133,8 +3137,18 @@ const App = {
       if (!pop) return;
       const r = trigger.getBoundingClientRect();
       pop.style.left = r.left + 'px';
-      pop.style.top = (r.bottom + 4) + 'px';
       pop.style.minWidth = r.width + 'px';
+      // Flip above the trigger when there isn't room below (trigger low in the
+      // viewport), so the list is never clipped off-screen.
+      const popH = pop.offsetHeight || 240;
+      const belowRoom = window.innerHeight - r.bottom;
+      if (belowRoom < popH + 8 && r.top > belowRoom) {
+        pop.style.top = Math.max(4, r.top - popH - 4) + 'px';
+        pop.style.transformOrigin = 'bottom';
+      } else {
+        pop.style.top = (r.bottom + 4) + 'px';
+        pop.style.transformOrigin = 'top';
+      }
     };
     const close = () => {
       if (!pop) return;
@@ -3169,14 +3183,19 @@ const App = {
       hi = sel.selectedIndex >= 0 ? sel.selectedIndex : 0;
       paintHi();
       const onDocDown = (e) => { if (!root.contains(e.target) && !pop.contains(e.target)) close(); };
-      const onScroll = () => close();
+      // Scrolling INSIDE the popover (it is overflow-y:auto) must NOT close it —
+      // only an OUTER scroll should, since the fixed popover would otherwise drift
+      // away from its trigger. Reposition on outer scroll instead of closing so
+      // the list tracks the trigger while an ancestor scrolls.
+      const onScroll = (e) => { if (pop && pop.contains(e.target)) return; place(); };
+      const onResize = () => close();
       document.addEventListener('mousedown', onDocDown, true);
       window.addEventListener('scroll', onScroll, true);
-      window.addEventListener('resize', onScroll, true);
+      window.addEventListener('resize', onResize, true);
       cleanup = () => {
         document.removeEventListener('mousedown', onDocDown, true);
         window.removeEventListener('scroll', onScroll, true);
-        window.removeEventListener('resize', onScroll, true);
+        window.removeEventListener('resize', onResize, true);
       };
     };
     const move = (d) => {
