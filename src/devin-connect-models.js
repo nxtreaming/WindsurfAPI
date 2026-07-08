@@ -128,12 +128,14 @@ const SELECTOR_MAP = new Map(Object.entries({
 // frame-verified 2026-06-30). A value written to GetChatMessageRequest #21 that
 // is NOT in this set makes the upstream return UPSTREAM_INTERNAL (frame-proven
 // 2026-07-04: bare "claude-opus-4-8" failed, "claude-opus-4-8-medium" 200'd).
-// Used as a last-line existence guard on enum/dash-form passthrough. Loaded the
-// same way other src modules read JSON fixtures (JSON.parse + readFileSync), so
-// this stays a zero-dep ESM module with no import assertion.
+// Used as a last-line existence guard on enum/dash-form passthrough. Ships under
+// src/ (NOT test/) so it is present in the Docker image — the Dockerfile only
+// COPYs src/, so a runtime read from test/ crashes the container on boot. Loaded
+// with JSON.parse + readFileSync so this stays a zero-dep ESM module with no
+// import assertion. The catalog-drift test reads this same file (single source).
 const CATALOG_SELECTORS = new Set(
   JSON.parse(
-    readFileSync(new URL('../test/fixtures/devin-catalog-snapshot.json', import.meta.url), 'utf8'),
+    readFileSync(new URL('./data/devin-catalog-snapshot.json', import.meta.url), 'utf8'),
   ).models.map((m) => m.selector),
 );
 

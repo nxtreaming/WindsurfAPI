@@ -4,17 +4,21 @@ import { readFileSync } from 'node:fs';
 import { beforeEach } from 'node:test';
 import { resolveConnectSelector, FREE_TIER_SELECTOR, __testing } from '../src/devin-connect-models.js';
 
-// Offline catalog drift guard. The committed snapshot (test/fixtures/
+// Offline catalog drift guard. The committed snapshot (src/data/
 // devin-catalog-snapshot.json) is the last known live GetCliModelConfigs
 // catalog. These tests fail when the hand-maintained SELECTOR_MAP drifts away
 // from what upstream actually serves, prompting a map + snapshot refresh.
+//
+// The snapshot lives under src/ (not test/fixtures/) because runtime code
+// (src/devin-connect-models.js) reads it and the Docker image only ships src/.
+// This test reads that same shipped file so the drift guard also protects it.
 //
 // No network: the snapshot is the source of truth. The LIVE diff lives in the
 // gated smoke (scripts/devin-connect-smoke.mjs / DEVIN_CONNECT_DRIFT_REAL=1),
 // keeping `npm test` fully offline. See memory devin-catalog-userstatus-wire-2026-06-30.
 
 const snapshot = JSON.parse(
-  readFileSync(new URL('./fixtures/devin-catalog-snapshot.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/data/devin-catalog-snapshot.json', import.meta.url), 'utf8'),
 );
 const catalog = snapshot.models;
 const catalogSelectors = new Set(catalog.map((m) => m.selector));
@@ -78,7 +82,7 @@ describe('catalog drift: hand-curated map targets exist in the catalog', () => {
         catalogSelectors.has(target),
         `SELECTOR_MAP["${name}"] = "${target}" is not in the catalog snapshot — `
         + 'either upstream renamed it (update the map) or the snapshot is stale '
-        + '(refresh test/fixtures/devin-catalog-snapshot.json).',
+        + '(refresh src/data/devin-catalog-snapshot.json).',
       );
     });
   }
