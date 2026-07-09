@@ -282,7 +282,7 @@ code {
   flex-direction: column;
   min-height: 104px;
 }
-.card:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--border-strong); }
+.card:hover { transform: translateY(1px); box-shadow: var(--shadow-sm); border-color: var(--border-strong); }
 
 /* ─── Self-Healing cells (C1) ─── */
 .heal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
@@ -290,7 +290,7 @@ code {
 .heal-cell.good { border-left-color: var(--green); }
 .heal-cell.bad { border-left-color: var(--error); }
 .heal-cell.neutral { border-left-color: var(--blue); }
-.heal-cell:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+.heal-cell:hover { box-shadow: var(--shadow-sm); transform: translateY(1px); }
 .heal-cell .heal-num { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; letter-spacing: -.02em; }
 .heal-cell.good .heal-num { color: var(--green); }
 .heal-cell.bad.hot .heal-num { color: var(--error); }
