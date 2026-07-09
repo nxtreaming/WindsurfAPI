@@ -151,21 +151,32 @@ export function _resetRuntimeConfigForTests(patch = {}) {
 }
 
 export function getExperimental() {
-  return { ...(_state.experimental || {}) };
+  // Return only known flags (defaults filled in), so any orphan keys left in an
+  // old runtime-config.json by a pre-whitelist client don't leak back out.
+  const out = { ...DEFAULTS.experimental };
+  for (const k of Object.keys(DEFAULTS.experimental)) {
+    if (typeof _state.experimental?.[k] === 'boolean') out[k] = _state.experimental[k];
+  }
+  return out;
 }
 
 export function isExperimentalEnabled(key) {
   return !!_state.experimental?.[key];
 }
 
+// Whitelist of valid experimental flags, derived from DEFAULTS so a new flag is
+// covered automatically. A stale/hostile client can otherwise inject arbitrary
+// boolean junk keys that persist forever.
+const EXPERIMENTAL_KEYS = new Set(Object.keys(DEFAULTS.experimental));
+
 export function setExperimental(patch) {
   if (!patch || typeof patch !== 'object') return getExperimental();
-  _state.experimental = { ...(_state.experimental || {}), ...patch };
-  // Coerce to booleans — the dashboard ships JSON but we never want truthy
-  // strings sneaking in as "true".
-  for (const k of Object.keys(_state.experimental)) {
-    _state.experimental[k] = !!_state.experimental[k];
+  const next = { ...(_state.experimental || {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (!EXPERIMENTAL_KEYS.has(k)) continue; // reject unknown keys
+    next[k] = !!v; // coerce to boolean — never let truthy strings sneak in
   }
+  _state.experimental = next;
   persist();
   return getExperimental();
 }
@@ -249,13 +260,23 @@ export function getSystemPrompts() {
   return out;
 }
 
+// Upper bound on a stored prompt override. These ride into Cascade proto fields
+// on every request; an unbounded blob would waste memory/bandwidth. Generous
+// enough for a large system prompt.
+const SYSTEM_PROMPT_MAX_LEN = 20000;
+
 export function setSystemPrompts(patch) {
   if (!patch || typeof patch !== 'object') return getSystemPrompts();
   const current = _state.systemPrompts || {};
   for (const [k, v] of Object.entries(patch)) {
     if (!SYSTEM_PROMPT_KEYS.has(k)) continue;
     if (typeof v !== 'string') continue;
-    current[k] = v.trim();
+    const trimmed = v.trim();
+    // Empty override => drop the key so getSystemPrompts falls back to the
+    // built-in default, rather than persisting an empty string that would
+    // blank out the prompt entirely.
+    if (trimmed === '') { delete current[k]; continue; }
+    current[k] = trimmed.slice(0, SYSTEM_PROMPT_MAX_LEN);
   }
   _state.systemPrompts = current;
   persist();

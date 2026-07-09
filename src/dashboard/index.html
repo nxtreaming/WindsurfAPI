@@ -7732,7 +7732,7 @@ docker compose up -d --force-recreate</pre>
               <button class="btn btn-primary btn-xs" onclick="App.saveSystemPrompt('${keyArg}')">${I18n.t('experimental.save')}</button>
             </div>
           </div>
-          <textarea id="${promptId}" class="input" rows="3" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.5">${this.esc(text)}</textarea>
+          <textarea id="${promptId}" class="input" rows="3" maxlength="20000" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.5">${this.esc(text)}</textarea>
         </div>
       `;
       }).join('');
@@ -7742,8 +7742,13 @@ docker compose up -d --force-recreate</pre>
   async saveSystemPrompt(key) {
     const ta = document.getElementById(this.systemPromptDomId(key));
     if (!ta) return;
+    // An empty override resets the prompt to its built-in default (backend drops
+    // the key). Tell the user that's what happened, and reload so the textarea
+    // shows the restored default rather than the blank they just typed.
+    const wasEmpty = ta.value.trim() === '';
     await this.api('PUT', '/system-prompts', { [key]: ta.value.trim() });
-    this.toast(`${key} ${I18n.t('toast.saved')}`, 'success');
+    this.toast(`${key} ${wasEmpty ? I18n.t('experimental.restored') : I18n.t('toast.saved')}`, 'success');
+    if (wasEmpty) this.loadExperimental();
   },
 
   async resetSystemPrompt(key) {
