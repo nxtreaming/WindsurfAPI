@@ -2513,6 +2513,53 @@ tbody tr:hover td { background: var(--surface-2); }
         <div class="text-sm text-muted" data-i18n="settings.loading">加载中…</div>
       </div>
     </div>
+
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
+        <div>
+          <div class="section-title" data-i18n="section.systemPrompts.title">系统提示词</div>
+          <div class="section-desc" data-i18n="section.systemPrompts.desc">工具注入、对话模式等内置提示词模板。修改后立即生效，点"重置"恢复默认。</div>
+        </div>
+      </div>
+      <div class="section-body" id="system-prompts-editor" style="display:grid;gap:14px"></div>
+    </div>
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
+        <div>
+          <div class="section-title" data-i18n="section.credentials.title">凭证管理</div>
+          <div class="section-desc" data-i18n="section.credentials.desc">运行时改 API_KEY 和 Dashboard 密码，写入 runtime-config.json 立即生效，不用重启容器或重读 .env。改完之后下一次请求需要用新值；当前会话会要求重新登录。</div>
+        </div>
+      </div>
+      <div class="section-body" style="display:grid;gap:14px">
+        <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius);display:grid;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <strong data-i18n="credentials.apiKey">API_KEY</strong>
+            <span class="text-sm text-muted" id="credentials-apikey-source"></span>
+            <span class="text-sm" style="font-family:monospace" id="credentials-apikey-masked"></span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="password" class="input" id="credentials-apikey-input" data-i18n-placeholder="credentials.apiKeyPlaceholder" placeholder="新 API_KEY（≥ 8 字符；留空清除运行时覆盖）" style="flex:1;min-width:240px">
+            <button class="btn btn-outline btn-sm" onclick="App.toggleApiKeyVisibility()" data-i18n="credentials.show">显示/隐藏</button>
+            <button class="btn btn-primary btn-sm" onclick="App.saveCredential('apiKey')" data-i18n="credentials.save">保存</button>
+          </div>
+          <div class="text-sm text-muted" data-i18n="credentials.apiKeyHint">改完后所有 chat 客户端要换成新 KEY；旧 KEY 立即失效。</div>
+        </div>
+        <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius);display:grid;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <strong data-i18n="credentials.dashboardPassword">Dashboard 密码</strong>
+            <span class="text-sm text-muted" id="credentials-dashboardpw-source"></span>
+            <span class="text-sm" id="credentials-dashboardpw-status"></span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="password" class="input" id="credentials-dashboardpw-input" data-i18n-placeholder="credentials.dashboardPwPlaceholder" placeholder="新 Dashboard 密码（≥ 8 字符；留空清除运行时覆盖）" style="flex:1;min-width:240px">
+            <button class="btn btn-outline btn-sm" onclick="App.toggleDashboardPwVisibility()" data-i18n="credentials.show">显示/隐藏</button>
+            <button class="btn btn-primary btn-sm" onclick="App.saveCredential('dashboardPassword')" data-i18n="credentials.save">保存</button>
+          </div>
+          <div class="text-sm text-muted" data-i18n="credentials.dashboardPwHint">用 scrypt 派生哈希存盘；改完之后会自动登出当前会话，需要用新密码重登。</div>
+        </div>
+        <div class="text-sm text-muted" data-i18n="credentials.bruteForceHint">为防暴破：同一 IP 连续 5 次 dashboard 登录失败会被锁 30 分钟（2.0.56 起）。</div>
+      </div>
+    </div>
   </section>
 
   <section class="panel" id="p-models">
@@ -3011,52 +3058,6 @@ tbody tr:hover td { background: var(--surface-2); }
             <div class="text-sm text-muted" data-i18n="section.preflight.hint">默认关闭。会增加延迟;账号频繁耗尽时再开。</div>
           </div>
         </div>
-      </div>
-    </div>
-    <div class="section" style="margin-top:24px">
-      <div class="section-header">
-        <div>
-          <div class="section-title" data-i18n="section.systemPrompts.title">系统提示词</div>
-          <div class="section-desc" data-i18n="section.systemPrompts.desc">工具注入、对话模式等内置提示词模板。修改后立即生效，点"重置"恢复默认。</div>
-        </div>
-      </div>
-      <div class="section-body" id="system-prompts-editor" style="display:grid;gap:14px"></div>
-    </div>
-    <div class="section" style="margin-top:24px">
-      <div class="section-header">
-        <div>
-          <div class="section-title" data-i18n="section.credentials.title">凭证管理</div>
-          <div class="section-desc" data-i18n="section.credentials.desc">运行时改 API_KEY 和 Dashboard 密码，写入 runtime-config.json 立即生效，不用重启容器或重读 .env。改完之后下一次请求需要用新值；当前会话会要求重新登录。</div>
-        </div>
-      </div>
-      <div class="section-body" style="display:grid;gap:14px">
-        <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius);display:grid;gap:8px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <strong data-i18n="credentials.apiKey">API_KEY</strong>
-            <span class="text-sm text-muted" id="credentials-apikey-source"></span>
-            <span class="text-sm" style="font-family:monospace" id="credentials-apikey-masked"></span>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="password" class="input" id="credentials-apikey-input" data-i18n-placeholder="credentials.apiKeyPlaceholder" placeholder="新 API_KEY（≥ 8 字符；留空清除运行时覆盖）" style="flex:1;min-width:240px">
-            <button class="btn btn-outline btn-sm" onclick="App.toggleApiKeyVisibility()" data-i18n="credentials.show">显示/隐藏</button>
-            <button class="btn btn-primary btn-sm" onclick="App.saveCredential('apiKey')" data-i18n="credentials.save">保存</button>
-          </div>
-          <div class="text-sm text-muted" data-i18n="credentials.apiKeyHint">改完后所有 chat 客户端要换成新 KEY；旧 KEY 立即失效。</div>
-        </div>
-        <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius);display:grid;gap:8px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <strong data-i18n="credentials.dashboardPassword">Dashboard 密码</strong>
-            <span class="text-sm text-muted" id="credentials-dashboardpw-source"></span>
-            <span class="text-sm" id="credentials-dashboardpw-status"></span>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="password" class="input" id="credentials-dashboardpw-input" data-i18n-placeholder="credentials.dashboardPwPlaceholder" placeholder="新 Dashboard 密码（≥ 8 字符；留空清除运行时覆盖）" style="flex:1;min-width:240px">
-            <button class="btn btn-outline btn-sm" onclick="App.toggleDashboardPwVisibility()" data-i18n="credentials.show">显示/隐藏</button>
-            <button class="btn btn-primary btn-sm" onclick="App.saveCredential('dashboardPassword')" data-i18n="credentials.save">保存</button>
-          </div>
-          <div class="text-sm text-muted" data-i18n="credentials.dashboardPwHint">用 scrypt 派生哈希存盘；改完之后会自动登出当前会话，需要用新密码重登。</div>
-        </div>
-        <div class="text-sm text-muted" data-i18n="credentials.bruteForceHint">为防暴破：同一 IP 连续 5 次 dashboard 登录失败会被锁 30 分钟（2.0.56 起）。</div>
       </div>
     </div>
     <div class="section" style="margin-top:24px">
@@ -7757,10 +7758,6 @@ docker compose up -d --force-recreate</pre>
   },
 
   async loadExperimental() {
-    // v2.0.56: refresh the credentials snapshot whenever the user opens
-    // the experimental/settings panel so the masked key + source labels
-    // stay in sync with what runtime-config.json actually holds.
-    this.loadCredentials();
     const d = await this.api('GET', '/experimental');
     const cb = document.getElementById('exp-cascade-reuse');
     if (cb) cb.checked = !!d.flags?.cascadeConversationReuse;
@@ -7804,33 +7801,36 @@ docker compose up -d --force-recreate</pre>
       </div>
     `;
 
-    // System prompts editor
+  },
+
+  // System-prompts editor. Lives on the global Settings page (moved out of the
+  // experimental panel); loadSettings drives it.
+  async loadSystemPrompts() {
     const sp = await this.api('GET', '/system-prompts');
     const spHolder = document.getElementById('system-prompts-editor');
-    if (spHolder) {
-      const labels = {
-        toolReinforcement: I18n.t('experimental.toolReinforcement'),
-        communicationWithTools: I18n.t('experimental.communicationWithTools'),
-        communicationNoTools: I18n.t('experimental.communicationNoTools')
-      };
-      spHolder.innerHTML = Object.entries(sp.prompts || {}).map(([key, text]) => {
-        const safeKey = this.esc(key);
-        const keyArg = this.escJsAttr(key);
-        const promptId = this.systemPromptDomId(key);
-        return `
-        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--surface)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div><code style="color:var(--accent);font-weight:600">${safeKey}</code> <span class="text-sm text-muted">${this.esc(labels[key] || key)}</span></div>
-            <div class="btn-group">
-              <button class="btn btn-ghost btn-xs" onclick="App.resetSystemPrompt('${keyArg}')">${I18n.t('experimental.default')}</button>
-              <button class="btn btn-primary btn-xs" onclick="App.saveSystemPrompt('${keyArg}')">${I18n.t('experimental.save')}</button>
-            </div>
+    if (!spHolder) return;
+    const labels = {
+      toolReinforcement: I18n.t('experimental.toolReinforcement'),
+      communicationWithTools: I18n.t('experimental.communicationWithTools'),
+      communicationNoTools: I18n.t('experimental.communicationNoTools')
+    };
+    spHolder.innerHTML = Object.entries(sp.prompts || {}).map(([key, text]) => {
+      const safeKey = this.esc(key);
+      const keyArg = this.escJsAttr(key);
+      const promptId = this.systemPromptDomId(key);
+      return `
+      <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--surface)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div><code style="color:var(--accent);font-weight:600">${safeKey}</code> <span class="text-sm text-muted">${this.esc(labels[key] || key)}</span></div>
+          <div class="btn-group">
+            <button class="btn btn-ghost btn-xs" onclick="App.resetSystemPrompt('${keyArg}')">${I18n.t('experimental.default')}</button>
+            <button class="btn btn-primary btn-xs" onclick="App.saveSystemPrompt('${keyArg}')">${I18n.t('experimental.save')}</button>
           </div>
-          <textarea id="${promptId}" class="input" rows="3" maxlength="20000" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.5">${this.esc(text)}</textarea>
         </div>
-      `;
-      }).join('');
-    }
+        <textarea id="${promptId}" class="input" rows="3" maxlength="20000" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.5">${this.esc(text)}</textarea>
+      </div>
+    `;
+    }).join('');
   },
 
   async saveSystemPrompt(key) {
@@ -7842,7 +7842,7 @@ docker compose up -d --force-recreate</pre>
     const wasEmpty = ta.value.trim() === '';
     await this.api('PUT', '/system-prompts', { [key]: ta.value.trim() });
     this.toast(`${key} ${wasEmpty ? I18n.t('experimental.restored') : I18n.t('toast.saved')}`, 'success');
-    if (wasEmpty) this.loadExperimental();
+    if (wasEmpty) this.loadSystemPrompts();
   },
 
   async resetSystemPrompt(key) {
@@ -7850,7 +7850,7 @@ docker compose up -d --force-recreate</pre>
     if (!ok) return;
     await this.api('DELETE', `/system-prompts/${encodeURIComponent(key)}`);
     this.toast(`${key} ${I18n.t('experimental.restored') || 'reset'}`, 'success');
-    this.loadExperimental();
+    this.loadSystemPrompts();
   },
 
   async testLoginProxy() {
@@ -7920,6 +7920,9 @@ docker compose up -d --force-recreate</pre>
     this.renderSecuritySettings();
     // Read-only view of the deploy-time backend/env switches.
     this.renderRuntimeEnvStatus();
+    // Credentials + system prompts (moved here from the experimental panel).
+    this.loadCredentials();
+    this.loadSystemPrompts();
   },
 
   async renderRuntimeEnvStatus() {
