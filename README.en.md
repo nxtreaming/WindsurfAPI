@@ -1,4 +1,4 @@
-# WindsurfAPI
+# WindsurfAPI · DevinAPI
 
 > Turn Windsurf / Devin's 100+ AI models (Claude, GPT, Gemini, DeepSeek, Kimi, GLM, SWE…) into OpenAI / Anthropic / Gemini standard APIs. Zero npm runtime dependencies.
 
@@ -18,12 +18,16 @@
 
 ---
 
-Turns [Windsurf](https://windsurf.com) (formerly Codeium)'s AI models into **two standard, compatible APIs**:
+Turns [Windsurf](https://windsurf.com) (formerly Codeium, now Devin Desktop)'s AI models into **three standard, compatible APIs**:
 
 - `POST /v1/chat/completions` — **OpenAI Compatible** for any OpenAI SDK.
+- `POST /v1/responses` — **OpenAI Responses Compatible**.
 - `POST /v1/messages` — **Anthropic Compatible** for direct connection with Claude Code / Cline / Cursor.
+- `POST /v1beta/models/*` — **Gemini Compatible** for direct Gemini SDK use.
 
 **100+ Models**: Claude 4.5/4.6/Opus 4.7 · GPT-5/5.1/5.2/5.4 series · Gemini 2.5/3.0/3.1 · Grok · Qwen · Kimi K2.x · GLM 4.7/5/5.1/5.2 · MiniMax · SWE 1.5/1.6 · Arena, etc. Zero npm dependencies, pure Node.js.
+
+<sub>Keywords: Windsurf reverse proxy · Devin API · Claude Code proxy · Cursor mirror · free Claude/GPT/Gemini · Codeium API · OpenAI-compatible endpoint · self-hosted LLM gateway</sub>
 
 ## What is it doing?
 

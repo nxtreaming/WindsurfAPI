@@ -1,4 +1,4 @@
-# WindsurfAPI
+# WindsurfAPI · DevinAPI
 
 > 把 Windsurf / Devin 的 100+ AI 模型（Claude、GPT、Gemini、DeepSeek、Kimi、GLM、SWE…）变成 OpenAI / Anthropic / Gemini 三套标准 API。零 npm 运行时依赖。
 
@@ -18,12 +18,16 @@
 
 ---
 
-把 [Windsurf](https://windsurf.com)（原 Codeium）的 AI 模型变成**两套标准 API 同时兼容**：
+把 [Windsurf](https://windsurf.com)（原 Codeium，现 Devin Desktop）的 AI 模型变成**三套标准 API 同时兼容**：
 
 - `POST /v1/chat/completions` — **OpenAI 兼容** 任何 OpenAI SDK 直接用
+- `POST /v1/responses` — **OpenAI Responses 兼容**
 - `POST /v1/messages` — **Anthropic 兼容** Claude Code / Cline / Cursor 直接连
+- `POST /v1beta/models/*` — **Gemini 兼容** 直接对接 Gemini SDK
 
 **100+ 模型**：Claude 4.5/4.6/Opus 4.7 · GPT-5/5.1/5.2/5.4 全系 · Gemini 2.5/3.0/3.1 · Grok · Qwen · Kimi K2.x · GLM 4.7/5/5.1/5.2 · MiniMax · SWE 1.5/1.6 · Arena 等。零 npm 依赖 纯 Node.js。
+
+<sub>关键词：Windsurf 逆向 · Devin 代理 · Claude Code 中转 · Cursor 镜像 · AI 中转 API · OpenAI 兼容接口 · 免费 Claude/GPT/Gemini · 大模型反代 · Codeium 逆向</sub>
 
 ## 它到底在干嘛
 
