@@ -12,7 +12,7 @@
 
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { isStickyEnabled, getStickyBinding, setStickyBinding, clearStickyBinding } from './account/sticky-session.js';
-import { isExperimentalEnabled, getDroughtThresholdPercent } from './runtime-config.js';
+import { isExperimentalEnabled, getDroughtThresholdPercent, getIpLockThreshold, getIpLockMs } from './runtime-config.js';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, readdirSync } from 'fs';
 import { config, log } from './config.js';
 import { safeAccountRef } from './log-safety.js';
@@ -2782,6 +2782,14 @@ export function getLockoutState(ip) {
  */
 export function checkLockout(ip) {
   if (!ip) return { blocked: false, retryAfterMs: 0, count: 0 };
+  // Operator disabled the IP lockout (threshold 0) from Settings: release any
+  // existing ban immediately instead of leaving it to expire naturally. Without
+  // this, an operator who locked themselves out and then set 0 wouldn't get in
+  // until the old ban aged out — contradicting the "0 = off" mental model.
+  if (getIpLockThreshold() <= 0) {
+    _lockoutAttempts.delete(ip);
+    return { blocked: false, retryAfterMs: 0, count: 0 };
+  }
   const e = _lockoutAttempts.get(ip);
   if (!e) return { blocked: false, retryAfterMs: 0, count: 0 };
   const now = _now();
@@ -2799,6 +2807,9 @@ export function checkLockout(ip) {
 
 export function failedAuthAttempt(ip) {
   if (!ip) return { blocked: false, retryAfterMs: 0, count: 0 };
+  // Operator can disable the IP lockout entirely (threshold 0) from Settings.
+  const threshold = getIpLockThreshold();
+  if (threshold <= 0) return { blocked: false, retryAfterMs: 0, count: 0 };
   const now = _now();
   let e = _lockoutAttempts.get(ip);
   if (!e) {
@@ -2814,8 +2825,8 @@ export function failedAuthAttempt(ip) {
   }
   e.count += 1;
   e.lastActivity = now;
-  if (e.count >= LOCKOUT_THRESHOLD) {
-    e.blockedUntil = now + LOCKOUT_DURATION_MS;
+  if (e.count >= threshold) {
+    e.blockedUntil = now + getIpLockMs();
     e.count = 0; // reset counter so the next post-ban failure starts fresh
   }
   return {
@@ -3016,21 +3027,29 @@ export async function initAuth() {
   // LS instances are on-demand by default: current LS builds can consume
   // ~500MB RSS including the child worker, so prewarming every proxy on a
   // small VPS can exhaust memory before any request arrives.
-  const { ensureLs, shouldPrewarmDefaultLs } = await import('./langserver.js');
-  const uniqueProxies = new Map();
-  if (shouldPrewarmDefaultLs()) {
-    uniqueProxies.set('default', null);
-  }
-  if (process.env.LS_PREWARM_PROXIES === '1') {
-    for (const a of accounts) {
-      const p = getEffectiveProxy(a.id);
-      const k = p ? `${p.host}:${p.port}` : 'default';
-      if (!uniqueProxies.has(k)) uniqueProxies.set(k, p || null);
+  //
+  // DEVIN_CONNECT / DEVIN_ONLY are binary-less (pure HTTP to Devin cloud), so the
+  // language server is never used — skip warmup to avoid the misleading "LS
+  // instance spawn error / warmup failed" noise on every Devin-only startup.
+  const lsBackendUnused = String(process.env.DEVIN_CONNECT || '').trim() === '1'
+    || String(process.env.DEVIN_ONLY || '').trim() === '1';
+  if (!lsBackendUnused) {
+    const { ensureLs, shouldPrewarmDefaultLs } = await import('./langserver.js');
+    const uniqueProxies = new Map();
+    if (shouldPrewarmDefaultLs()) {
+      uniqueProxies.set('default', null);
     }
-  }
-  for (const p of uniqueProxies.values()) {
-    try { await ensureLs(p); }
-    catch (e) { log.warn(`LS warmup failed: ${e.message}`); }
+    if (process.env.LS_PREWARM_PROXIES === '1') {
+      for (const a of accounts) {
+        const p = getEffectiveProxy(a.id);
+        const k = p ? `${p.host}:${p.port}` : 'default';
+        if (!uniqueProxies.has(k)) uniqueProxies.set(k, p || null);
+      }
+    }
+    for (const p of uniqueProxies.values()) {
+      try { await ensureLs(p); }
+      catch (e) { log.warn(`LS warmup failed: ${e.message}`); }
+    }
   }
 
   const counts = getAccountCount();

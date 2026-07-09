@@ -91,13 +91,20 @@ describe('CheckUserLoginMethod empty-body fallback (#follow-up)', () => {
       'when neither field is present, must return null so caller falls back to /_devin-auth/connections');
   });
 
-  test('falsy-but-present hasPassword:false still throws ERR_NO_PASSWORD_SET (we did not over-relax)', () => {
+  test('falsy-but-present hasPassword:false still throws a clear OAuth-account error (we did not over-relax)', () => {
     // Make sure the fix didn't accidentally silence the legitimate
     // "no password, sign in via Google" case. windsurfLogin still
     // throws when conn.method==='auth1' && !conn.hasPassword.
     const m = LOGIN_JS.match(/if \(conn\.method === 'auth1'\)[\s\S]+?if \(!conn\.hasPassword\)[\s\S]+?\}/);
     assert.ok(m, 'auth1 + !hasPassword branch removed or refactored');
-    assert.match(m[0], /No password set/i,
-      'must still surface the "No password set. Please log in with Google or GitHub." friendly error');
+    // The message must still make clear this is a no-password / OAuth account
+    // (it now points users to OAuth / token instead of the old wording).
+    assert.match(m[0], /no password|OAuth|Google\/GitHub/i,
+      'must still surface a clear "this account has no password, use OAuth/token" friendly error');
+    // v3: a no-password result is a WRONG-METHOD signal, not a brute-force
+    // guess — it must NOT feed the email lockout (that locked users for using
+    // the wrong login tab). Assert the branch does not record a failure.
+    assert.doesNotMatch(m[0], /recordEmailFailure/,
+      'no_password must not count toward the email lockout');
   });
 });

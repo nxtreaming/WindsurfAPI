@@ -8,6 +8,7 @@ import https from 'https';
 import { log } from '../config.js';
 import { safeEmailRef, safeKeyRef, logHash } from '../log-safety.js';
 import { isSocks, createSocksTunnel } from '../socks.js';
+import { getEmailLockThreshold, getEmailLockMs } from '../runtime-config.js';
 
 const FIREBASE_API_KEY = 'AIzaSyDsOl-1XpT5err0Tcnx8FFod1H8gVGIycY';
 const FIREBASE_AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`;
@@ -693,6 +694,12 @@ export function _resetEmailLockoutForTests() { _emailFailures.clear(); }
 export function checkEmailLocked(email) {
   if (!email || typeof email !== 'string') return null;
   const k = email.toLowerCase();
+  // Operator disabled the email lockout (threshold 0): release any existing
+  // lock immediately so "0 = off" takes effect now, not at natural expiry.
+  if (getEmailLockThreshold() <= 0) {
+    _emailFailures.delete(k);
+    return null;
+  }
   const e = _emailFailures.get(k);
   if (!e) return null;
   const now = Date.now();
@@ -706,6 +713,9 @@ export function checkEmailLocked(email) {
 
 function recordEmailFailure(email, reason) {
   if (!email) return;
+  // Operator can disable the email lockout entirely (threshold 0) from Settings.
+  const threshold = getEmailLockThreshold();
+  if (threshold <= 0) return;
   const k = email.toLowerCase();
   const now = Date.now();
   let e = _emailFailures.get(k);
@@ -713,10 +723,11 @@ function recordEmailFailure(email, reason) {
   e.count += 1;
   e.lastActivity = now;
   e.lastReason = reason ? String(reason).slice(0, 80) : '';
-  if (e.count >= EMAIL_LOCK_THRESHOLD) {
-    e.lockedUntil = now + EMAIL_LOCK_DURATION_MS;
+  if (e.count >= threshold) {
+    const durMs = getEmailLockMs();
+    e.lockedUntil = now + durMs;
     e.count = 0;
-    log.warn(`Email lockout: ${safeEmailRef(k)} banned for ${EMAIL_LOCK_DURATION_MS / 60000}min after ${EMAIL_LOCK_THRESHOLD} failed Windsurf logins (last="${e.lastReason}")`);
+    log.warn(`Email lockout: ${safeEmailRef(k)} banned for ${Math.round(durMs / 60000)}min after ${threshold} failed Windsurf logins (last="${e.lastReason}")`);
   }
 }
 
@@ -737,7 +748,7 @@ export async function windsurfLogin(email, password, proxy = null) {
   const lockMs = checkEmailLocked(email);
   if (lockMs != null) {
     const minutes = Math.ceil(lockMs / 60000);
-    const err = new Error(`Email ${email} 因连续 ${EMAIL_LOCK_THRESHOLD} 次登录失败被本地锁定，请 ${minutes} 分钟后再试。`);
+    const err = new Error(`Email ${email} 因连续 ${getEmailLockThreshold()} 次登录失败被本地锁定，请 ${minutes} 分钟后再试。`);
     err.code = 'ERR_EMAIL_LOCKED';
     err.retryAfterMs = lockMs;
     err.isAuthFail = false;
@@ -803,8 +814,12 @@ async function windsurfLoginPrimaryHost(email, password, fingerprint, proxy) {
 
   if (conn.method === 'auth1') {
     if (!conn.hasPassword) {
-      const err = createFriendlyAuthError('Auth1', 'No password set. Please log in with Google or GitHub.');
-      recordEmailFailure(email, 'no_password');
+      // This account has no email/password set — it registered via Google/GitHub
+      // OAuth. That's a WRONG-METHOD signal, not a brute-force guess, so it must
+      // NOT count toward the email lockout (otherwise using the wrong login tab
+      // 3x locks the user out for 15min). Just return a clear, actionable error.
+      const err = createFriendlyAuthError('Auth1', 'This account has no password (registered via Google/GitHub). Use the OAuth login, or paste an Auth Token from windsurf.com/show-auth-token.');
+      err.code = 'ERR_NO_PASSWORD_OAUTH_ACCOUNT';
       throw err;
     }
     try {
