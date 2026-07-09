@@ -19,6 +19,7 @@ import { safeAccountRef } from './log-safety.js';
 import { renameSyncWithRetry } from './fs-atomic.js';
 import { getEffectiveProxy } from './dashboard/proxy-config.js';
 import { getTierModels, getModelKeysByEnum, MODELS, registerDiscoveredFreeModel } from './models.js';
+import { FREE_REACHABLE_SELECTORS } from './devin-connect-models.js';
 import { getLsAdmissionStatus, getLsMaintenanceRequests } from './langserver.js';
 import { bumpConnect } from './devin-connect-metrics.js';
 
@@ -752,6 +753,32 @@ export function isModelAllowedForAccount(account, modelKey) {
   return tierModels.includes(modelKey);
 }
 
+// Connect-namespace entitlement. `selector` is the RESOLVED canonical selector
+// (resolveConnectSelector output), NOT a catalog/MODELS key — so this must NOT
+// reuse isModelAllowedForAccount (that filter is MODELS-namespace and returns
+// false for every connect selector, even on a pro account, which is exactly why
+// the connect path historically skipped model-aware selection). fable etc. have
+// no enum, so per-account entitlement here is tier-bucket-grained: free accounts
+// can only run FREE_REACHABLE_SELECTORS; paid selectors need a paid (or not-yet-
+// probed 'unknown') account. Prevents routing a paid selector to a free account,
+// which the upstream rejects as permission_denied (surfaced as a 529).
+export function isConnectSelectorAllowedForAccount(account, selector) {
+  if (!selector) return true;                       // no selector → no filter (back-compat)
+  const blocked = account.blockedModels || [];
+  if (blocked.includes(selector)) return false;     // operator blocklist (best-effort)
+  if (FREE_REACHABLE_SELECTORS.has(selector)) return true; // free-reachable → any account
+  const bucket = tierBucket(account.tier);
+  // Paid selector: require a paid bucket. 'unknown' (unprobed new account) is
+  // allowed — it self-heals to 'free' after a probe, then gets blocked here on
+  // the next request, matching MODEL_TIER_ACCESS.unknown's optimistic policy.
+  return bucket === 'pro' || bucket === 'unknown';
+}
+
+// True if at least one active account is entitled to this connect selector.
+export function hasConnectEntitledAccount(selector) {
+  return accounts.some(a => a.status === 'active' && isConnectSelectorAllowedForAccount(a, selector));
+}
+
 /** List of model keys this account is currently allowed to call. */
 export function getAvailableModelsForAccount(account) {
   const blocked = new Set(account.blockedModels || []);
@@ -1063,7 +1090,7 @@ export function removeAccount(id) {
  * Returns null when every account is temporarily full — callers should
  * wait a moment and retry (see handlers/chat.js queue loop).
  */
-export function getApiKey(excludeKeys = [], modelKey = null, callerKey = null) {
+export function getApiKey(excludeKeys = [], modelKey = null, callerKey = null, connectSelector = null) {
   const now = Date.now();
 
   // ── Sticky session: prefer the account from the last turn ────────
@@ -1079,7 +1106,8 @@ export function getApiKey(excludeKeys = [], modelKey = null, callerKey = null) {
         const limit = rpmLimitFor(acct);
         const used = pruneRpmHistory(acct, now);
         if (limit > 0 && used < limit && !isRateLimitedForModel(acct, modelKey, now) && !isAccountInMaintenance(acct)) {
-          if (!modelKey || isModelAllowedForAccount(acct, modelKey)) {
+          if ((!modelKey || isModelAllowedForAccount(acct, modelKey))
+              && (!connectSelector || isConnectSelectorAllowedForAccount(acct, connectSelector))) {
             const reservationTimestamp = nextReservationToken(now);
             acct._rpmHistory.push(reservationTimestamp);
             acct.lastUsed = now;
@@ -1121,6 +1149,7 @@ export function getApiKey(excludeKeys = [], modelKey = null, callerKey = null) {
     if (used >= limit) continue;
     // Tier entitlement + per-account blocklist filter
     if (modelKey && !isModelAllowedForAccount(a, modelKey)) continue;
+    if (connectSelector && !isConnectSelectorAllowedForAccount(a, connectSelector)) continue;
     candidates.push({ account: a, used, limit });
   }
   if (candidates.length === 0) return null;
@@ -1348,7 +1377,7 @@ export function __inflightStaleMs() { return inflightStaleMs(); }
  * upstream cascade_id — if that account is momentarily unavailable we fall
  * back to a fresh cascade on a different account instead of queuing.
  */
-export function acquireAccountByKey(apiKey, modelKey = null) {
+export function acquireAccountByKey(apiKey, modelKey = null, connectSelector = null) {
   const now = Date.now();
   const a = accounts.find(x => x.apiKey === apiKey);
   if (!a) return null;
@@ -1360,6 +1389,7 @@ export function acquireAccountByKey(apiKey, modelKey = null) {
   const used = pruneRpmHistory(a, now);
   if (used >= limit) return null;
   if (modelKey && !isModelAllowedForAccount(a, modelKey)) return null;
+  if (connectSelector && !isConnectSelectorAllowedForAccount(a, connectSelector)) return null;
   const reservationTimestamp = nextReservationToken(now);
   a._rpmHistory.push(reservationTimestamp);
   a.lastUsed = now;
@@ -1958,13 +1988,14 @@ export function clearBanSignals(apiKey) {
  * Returns { allLimited, retryAfterMs } — callers can use retryAfterMs to set
  * a Retry-After header for 429 responses.
  */
-export function isAllRateLimited(modelKey) {
+export function isAllRateLimited(modelKey, connectSelector = null) {
   const now = Date.now();
   let soonestExpiry = Infinity;
   let anyEligible = false;
   for (const a of accounts) {
     if (a.status !== 'active') continue;
     if (modelKey && !isModelAllowedForAccount(a, modelKey)) continue;
+    if (connectSelector && !isConnectSelectorAllowedForAccount(a, connectSelector)) continue;
     anyEligible = true;
     if (!isRateLimitedForModel(a, modelKey, now)) return { allLimited: false };
     // Track the soonest expiry across both global and per-model limits
@@ -1986,7 +2017,7 @@ export function isAllRateLimited(modelKey) {
   return { allLimited: true, retryAfterMs };
 }
 
-export function isAllTemporarilyUnavailable(modelKey) {
+export function isAllTemporarilyUnavailable(modelKey, connectSelector = null) {
   const now = Date.now();
   let anyEligible = false;
   let soonestExpiry = Infinity;
@@ -1996,6 +2027,7 @@ export function isAllTemporarilyUnavailable(modelKey) {
     const limit = rpmLimitFor(a);
     if (limit <= 0) continue;
     if (modelKey && !isModelAllowedForAccount(a, modelKey)) continue;
+    if (connectSelector && !isConnectSelectorAllowedForAccount(a, connectSelector)) continue;
     anyEligible = true;
 
     if (a.rateLimitedUntil && a.rateLimitedUntil > now) {

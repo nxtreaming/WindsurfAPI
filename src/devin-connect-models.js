@@ -142,6 +142,12 @@ const CATALOG_SELECTORS = new Set(
 // The only selector a free-tier account can actually run. Used as the safe
 // default when DEVIN_CONNECT is enabled but the requested model isn't mapped.
 export const FREE_TIER_SELECTOR = 'swe-1-6-slow';
+// Canonical selectors a free-tier account can actually run. Per this module's
+// docstring, free resolves ONLY swe-1-6-slow; every other selector returns
+// "/upgrade" upstream. Keep in sync with free-tier live probes. Used by the
+// connect-namespace entitlement filter so a paid selector (e.g. a fable) is not
+// routed to a free account, which the upstream would reject as permission_denied.
+export const FREE_REACHABLE_SELECTORS = new Set(['swe-1-6-slow']);
 
 /**
  * Resolve a client-supplied model name to an upstream DEVIN_CONNECT selector.

@@ -5,7 +5,7 @@
 
 import { createHash, randomUUID } from 'crypto';
 import { WindsurfClient, contentToString, isCascadeTransportError } from '../client.js';
-import { getApiKey, acquireAccountByKey, releaseAccount, releaseAccountById, currentApiKeyForId, getAccountAvailability, reportError, reportSuccess, markRateLimited, markQuotaExhausted, reportInternalError, reportDeadToken, updateCapability, getAccountList, isAllRateLimited, isAllTemporarilyUnavailable, refundReservation, looksLikeBanSignal, reportBanSignal, clearBanSignals, isModelBlockedByDrought, getDroughtSummary, reLoginAccount, getAccountCount } from '../auth.js';
+import { getApiKey, acquireAccountByKey, releaseAccount, releaseAccountById, currentApiKeyForId, getAccountAvailability, reportError, reportSuccess, markRateLimited, markQuotaExhausted, reportInternalError, reportDeadToken, updateCapability, getAccountList, isAllRateLimited, isAllTemporarilyUnavailable, refundReservation, looksLikeBanSignal, reportBanSignal, clearBanSignals, isModelBlockedByDrought, getDroughtSummary, reLoginAccount, getAccountCount, hasConnectEntitledAccount } from '../auth.js';
 import { isStickyEnabled, setStickyBinding } from '../account/sticky-session.js';
 import { resolveModel, getModelInfo, pickRateLimitFallback } from '../models.js';
 import { getLsFor, ensureLs } from '../langserver.js';
@@ -1630,16 +1630,18 @@ export function __resetConnectDeps() {
 // WINDSURF_API_KEY/DEVIN_CONNECT_TOKEN in env), acct is null and the connect
 // client falls back to the env token — so a single-token deploy still works.
 //
-// Account selection passes modelKey=null: connect selectors (swe-1-6-slow,
-// claude-*-medium) are a different namespace from the Cascade catalog, so the
-// per-account model-allow filter must not exclude otherwise-usable accounts.
-async function acquireConnectAccount(signal, callerKey) {
+// Account selection passes the RESOLVED connect `selector` (not a Cascade
+// catalog key) so the connect-namespace entitlement filter keeps a paid selector
+// (e.g. a fable) off a free account, which the upstream rejects as
+// permission_denied. modelKey stays null — connect selectors are a different
+// namespace from the Cascade catalog and must not hit the catalog model-allow filter.
+async function acquireConnectAccount(signal, callerKey, selector = null) {
   // Empty pool (single-token deploy: only WINDSURF_API_KEY/DEVIN_CONNECT_TOKEN
   // in env) → there is nothing to wait for. Return null immediately for the
   // env-token fallback instead of blocking QUEUE_MAX_WAIT_MS on every request.
   if (getAccountCount().total === 0) return null;
   const tried = [];
-  const acct = await waitForAccount(tried, signal, QUEUE_MAX_WAIT_MS, null, callerKey);
+  const acct = await waitForAccount(tried, signal, QUEUE_MAX_WAIT_MS, null, callerKey, selector);
   return acct; // may be null → env-token fallback
 }
 
@@ -1655,9 +1657,9 @@ async function acquireConnectAccount(signal, callerKey) {
 // never re-enters the pool as "untried", so waiting on the queue deadline would
 // just stall the request for QUEUE_MAX_WAIT_MS before failing. We take whatever
 // untried account is selectable right now, or give up immediately.
-function acquireConnectFailover(triedKeys, signal, callerKey) {
+function acquireConnectFailover(triedKeys, signal, callerKey, selector = null) {
   if (signal?.aborted) return null;
-  return getApiKey(triedKeys, null, callerKey);
+  return getApiKey(triedKeys, null, callerKey, selector);
 }
 
 // How many times a single DEVIN_CONNECT request may hop to a fresh pooled
@@ -1763,9 +1765,9 @@ export function finalizeConnectAccount(acct, { model, startTime, err }) {
 // Wait until getApiKey returns a non-null account, or until maxWaitMs expires.
 // Used when every account has momentarily exhausted its RPM budget so the
 // client is queued instead of getting a 503.
-async function waitForAccount(tried, signal, maxWaitMs = QUEUE_MAX_WAIT_MS, modelKey = null, callerKey = null) {
+async function waitForAccount(tried, signal, maxWaitMs = QUEUE_MAX_WAIT_MS, modelKey = null, callerKey = null, connectSelector = null) {
   const deadline = Date.now() + maxWaitMs;
-  let acct = getApiKey(tried, modelKey, callerKey);
+  let acct = getApiKey(tried, modelKey, callerKey, connectSelector);
   while (!acct) {
     if (signal?.aborted) return null;
     if (Date.now() >= deadline) return null;
@@ -1774,7 +1776,7 @@ async function waitForAccount(tried, signal, maxWaitMs = QUEUE_MAX_WAIT_MS, mode
       return null;
     }
     await new Promise(r => setTimeout(r, QUEUE_RETRY_MS));
-    acct = getApiKey(tried, modelKey, callerKey);
+    acct = getApiKey(tried, modelKey, callerKey, connectSelector);
   }
   return acct;
 }
@@ -2185,8 +2187,28 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // the client backs off. A momentarily-busy (not rate-limited) account still
     // gets the queue benefit via acquireConnectAccount below.
     if (getAccountCount().total > 0) {
-      const rl = isAllRateLimited(null);
-      const tu = isAllTemporarilyUnavailable(null);
+      // No account entitled to this selector? (e.g. a paid selector like a fable
+      // with only free-tier accounts in the pool.) Fail fast with a clear 403
+      // instead of routing to an unentitled account and eating an upstream
+      // permission_denied (which surfaces to the client as an opaque 529). A
+      // single-token env deploy (DEVIN_CONNECT_TOKEN / WINDSURF_API_KEY) is
+      // exempt: it has no pool to filter, so let the env token serve.
+      const hasEnvToken = !!(process.env.DEVIN_CONNECT_TOKEN || process.env.WINDSURF_API_KEY);
+      if (!hasEnvToken && !hasConnectEntitledAccount(selector)) {
+        log.info(`Chat[${reqId}]: DEVIN_CONNECT no account entitled to selector "${selector}" → 403 model_not_entitled`);
+        bumpConnect('model_not_entitled');
+        return {
+          status: 403,
+          body: { error: {
+            message: `No account in the pool is entitled to model \`${reqModelName}\`. This model requires a paid Windsurf account; the current pool has only free-tier accounts. Add a paid account or request a free-tier model (e.g. swe-1-6-slow).`,
+            type: 'invalid_request_error',
+            param: 'model',
+            code: 'model_not_entitled',
+          } },
+        };
+      }
+      const rl = isAllRateLimited(null, selector);
+      const tu = isAllTemporarilyUnavailable(null, selector);
       if (rl.allLimited || tu.allUnavailable) {
         const retryAfterMs = rl.retryAfterMs || tu.retryAfterMs || 60000;
         log.info(`Chat[${reqId}]: DEVIN_CONNECT pool exhausted (all accounts rate-limited/unavailable) → 429 retry_after=${retryAfterMs}ms`);
@@ -2198,7 +2220,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
         };
       }
     }
-    const ccAcct = await acquireConnectAccount(context.signal, callerKey);
+    const ccAcct = await acquireConnectAccount(context.signal, callerKey, selector);
     const connectParams = { messages: connectMessages, model: selector };
     if (ccAcct) connectParams.token = ccAcct.apiKey;
     // NOTE (2026-07-08): host-forwarding kept but DISARMED-BY-DEFAULT. Live capture
@@ -2432,7 +2454,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
                 // !emitted, since replaying after bytes are on the wire would
                 // duplicate content. The offending account is already cooled.
                 if (isAccountFailoverError(r.err.code) && !emitted && hops < maxHops) {
-                  const next = await acquireConnectFailover(triedKeys, abortController.signal, callerKey);
+                  const next = await acquireConnectFailover(triedKeys, abortController.signal, callerKey, selector);
                   if (next) {
                     log.info(`Chat[${reqId}]: DEVIN_CONNECT ${r.err.code} on account → stream failover hop ${hops + 1} to next pooled account`);
                     bumpConnect('quota_failover_hops');
@@ -2447,7 +2469,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
               if (acct) reportDeadToken(acct.apiKey);
               bumpConnect('dead_tokens');
               if (hops >= maxHops || emitted) { bumpConnect('failover_exhausted'); send(chatStreamError('all DEVIN_CONNECT accounts exhausted (dead session tokens)', 'upstream_error', 'UNAUTHORIZED')); break; }
-              const next = await acquireConnectFailover(triedKeys, abortController.signal, callerKey);
+              const next = await acquireConnectFailover(triedKeys, abortController.signal, callerKey, selector);
               if (!next) { bumpConnect('failover_exhausted'); send(chatStreamError('all DEVIN_CONNECT accounts exhausted (dead session tokens)', 'upstream_error', 'UNAUTHORIZED')); break; }
               log.info(`Chat[${reqId}]: DEVIN_CONNECT failover hop ${hops + 1} → next pooled account`);
               bumpConnect('failover_hops');
@@ -2520,7 +2542,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
         // a 402/429 while healthy accounts sit idle. Non-stream is always replay-safe
         // (nothing reached the client yet). Exhausted pool → fall through to surface.
         if (isAccountFailoverError(r.err.code) && hops < maxHops) {
-          const next = await acquireConnectFailover(triedKeys, context.signal, callerKey);
+          const next = await acquireConnectFailover(triedKeys, context.signal, callerKey, selector);
           if (next) {
             log.info(`Chat[${reqId}]: DEVIN_CONNECT ${r.err.code} on account → failover hop ${hops + 1} to next pooled account`);
             bumpConnect('quota_failover_hops');
@@ -2544,7 +2566,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
         bumpConnect('failover_exhausted');
         return { status, body: { error: { message: 'all DEVIN_CONNECT accounts exhausted (dead session tokens)', type, code: 'UNAUTHORIZED' } } };
       }
-      const next = await acquireConnectFailover(triedKeys, context.signal, callerKey);
+      const next = await acquireConnectFailover(triedKeys, context.signal, callerKey, selector);
       if (!next) {
         const { status, type } = connectErrorToHttp('UNAUTHORIZED');
         log.error(`Chat[${reqId}]: DEVIN_CONNECT no more pooled accounts for failover`);
