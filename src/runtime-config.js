@@ -62,6 +62,22 @@ const DEFAULTS = {
     // (isDroughtMode + premium-model gating). Lower = more tolerant of low
     // balances before the pool is considered dry.
     droughtThresholdPercent: 5,
+    // Login-lockout knobs, operator-tunable from the Settings page. A THRESHOLD
+    // of 0 DISABLES that lockout entirely. Defaults match the historical
+    // hardcoded values so behavior is unchanged until an operator lowers them.
+    emailLockThreshold: 3,   // failed email logins before that email is locked
+    emailLockMinutes: 15,    // how long an email stays locked
+    ipLockThreshold: 5,      // failed dashboard auths before that IP is banned
+    ipLockMinutes: 30,       // how long an IP stays banned
+  },
+  // Dashboard UI preferences shared across browsers/devices (persisted here,
+  // not in each browser's localStorage). Booleans only; toggle from the
+  // global Settings page.
+  prefs: {
+    // When true, clicking a Google/GitHub OAuth login button skips the
+    // "open page / copy URL" chooser popup and opens the login page directly.
+    // Set via the popup's "don't ask again" checkbox; cleared from Settings.
+    oauthSkipChooser: false,
   },
   // System-level prompt templates injected into Cascade proto fields.
   // Editable from Dashboard so users can tune without code changes.
@@ -165,16 +181,62 @@ export function getDroughtThresholdPercent() {
   return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 5;
 }
 
+// Numeric tunables with their [min,max] clamps. Keeps setTunables data-driven
+// so the Settings page and any new knob stay in one table.
+const TUNABLE_BOUNDS = {
+  droughtThresholdPercent: [0, 100],
+  emailLockThreshold: [0, 50],
+  emailLockMinutes: [0, 1440],
+  ipLockThreshold: [0, 100],
+  ipLockMinutes: [0, 1440],
+};
+
 export function setTunables(patch) {
   if (!patch || typeof patch !== 'object') return getTunables();
   const next = { ...(_state.tunables || {}) };
-  if (patch.droughtThresholdPercent != null) {
-    const v = Number(patch.droughtThresholdPercent);
-    if (Number.isFinite(v)) next.droughtThresholdPercent = Math.max(0, Math.min(100, v));
+  for (const [key, [min, max]] of Object.entries(TUNABLE_BOUNDS)) {
+    if (patch[key] == null) continue;
+    const raw = patch[key];
+    // Only accept a real number or a non-empty numeric string. Guard against
+    // '' / '  ' / [] / false — all of which Number() coerces to 0 and would
+    // SILENTLY disable a lockout (a cleared input box saving as "off").
+    if (typeof raw !== 'number' && !(typeof raw === 'string' && raw.trim() !== '')) continue;
+    const v = Number(raw);
+    if (Number.isFinite(v)) next[key] = Math.max(min, Math.min(max, v));
   }
   _state.tunables = next;
   persist();
   return getTunables();
+}
+
+// Accessors for the lockout knobs (0 = disabled). Read by auth.js /
+// windsurf-login.js so a Settings change takes effect without restart.
+export function getEmailLockThreshold() { const v = Number(_state.tunables?.emailLockThreshold); return Number.isFinite(v) && v >= 0 ? v : 3; }
+export function getEmailLockMs() { const v = Number(_state.tunables?.emailLockMinutes); return (Number.isFinite(v) && v >= 0 ? v : 15) * 60 * 1000; }
+export function getIpLockThreshold() { const v = Number(_state.tunables?.ipLockThreshold); return Number.isFinite(v) && v >= 0 ? v : 5; }
+export function getIpLockMs() { const v = Number(_state.tunables?.ipLockMinutes); return (Number.isFinite(v) && v >= 0 ? v : 30) * 60 * 1000; }
+
+// Dashboard UI preferences (booleans, shared across browsers). Unknown keys are
+// ignored so a stale/hostile client can't inject arbitrary config.
+const PREF_KEYS = Object.keys(DEFAULTS.prefs);
+
+export function getPrefs() {
+  const out = { ...DEFAULTS.prefs };
+  for (const k of PREF_KEYS) {
+    if (typeof _state.prefs?.[k] === 'boolean') out[k] = _state.prefs[k];
+  }
+  return out;
+}
+
+export function setPrefs(patch) {
+  if (!patch || typeof patch !== 'object') return getPrefs();
+  const next = { ...(_state.prefs || {}) };
+  for (const k of PREF_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = !!patch[k];
+  }
+  _state.prefs = next;
+  persist();
+  return getPrefs();
 }
 
 export function getSystemPrompts() {
