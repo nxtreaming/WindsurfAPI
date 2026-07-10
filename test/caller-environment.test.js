@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractCallerEnvironment } from '../src/handlers/chat.js';
+import { extractCallerEnvironment, shouldLiftCallerEnv } from '../src/handlers/chat.js';
 import { buildToolPreambleForProto } from '../src/handlers/tool-emulation.js';
 
 // Why these tests exist:
@@ -392,5 +392,44 @@ describe('buildToolPreambleForProto with environment override', () => {
   it('still returns empty string when there are no tools (env alone is not enough to render)', () => {
     const out = buildToolPreambleForProto([], 'auto', '- Working directory: /x');
     assert.equal(out, '');
+  });
+});
+
+// #209: weak models (claude-5-fable-*) return an empty completion when a
+// caller <env> block is lifted into the tool_calling_section alongside
+// tools. shouldLiftCallerEnv gates the lift off for the fable family (and
+// via a global WINDSURFAPI_ENV_LIFT=0 escape hatch) while leaving every
+// other model byte-identical.
+describe('shouldLiftCallerEnv (#209 fable env-lift gate)', () => {
+  it('lifts env for a normal model on the emulation path', () => {
+    assert.equal(shouldLiftCallerEnv('claude-4.5-haiku', { emulateTools: true, env: {} }), true);
+    assert.equal(shouldLiftCallerEnv('claude-sonnet-4.6', { emulateTools: true, env: {} }), true);
+  });
+
+  it('skips the lift for every fable tier (the #209 fix)', () => {
+    for (const tier of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      assert.equal(
+        shouldLiftCallerEnv(`claude-5-fable-${tier}`, { emulateTools: true, env: {} }),
+        false,
+        `claude-5-fable-${tier} must not lift env`,
+      );
+    }
+    // bare + dotted variants of the family too
+    assert.equal(shouldLiftCallerEnv('claude-5-fable', { emulateTools: true, env: {} }), false);
+  });
+
+  it('never lifts when tools are not being emulated (no proto preamble to ride)', () => {
+    assert.equal(shouldLiftCallerEnv('claude-4.5-haiku', { emulateTools: false, env: {} }), false);
+    assert.equal(shouldLiftCallerEnv('claude-5-fable-high', { emulateTools: false, env: {} }), false);
+  });
+
+  it('honors the WINDSURFAPI_ENV_LIFT=0 global escape hatch for all models', () => {
+    assert.equal(shouldLiftCallerEnv('claude-4.5-haiku', { emulateTools: true, env: { WINDSURFAPI_ENV_LIFT: '0' } }), false);
+    // any other value keeps the default (lift on)
+    assert.equal(shouldLiftCallerEnv('claude-4.5-haiku', { emulateTools: true, env: { WINDSURFAPI_ENV_LIFT: '1' } }), true);
+  });
+
+  it('glm-5.2 is NOT weak-model-gated (goes through gpt_native, unaffected by #209)', () => {
+    assert.equal(shouldLiftCallerEnv('glm-5.2', { emulateTools: true, env: {} }), true);
   });
 });

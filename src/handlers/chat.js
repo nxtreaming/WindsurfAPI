@@ -26,7 +26,7 @@ import {
   normalizeMessagesForCascade, ToolCallStreamParser, parseToolCallsFromText, stripToolMarkupFromText,
   buildToolPreambleForProto, buildCompactToolPreambleForProto,
   buildSchemaCompactToolPreambleForProto, buildSkinnyToolPreambleForProto,
-  trimToolsForWeakModel,
+  trimToolsForWeakModel, isWeakEmulationModel,
 } from './tool-emulation.js';
 import {
   getNativeBridgeDecision, buildReverseLookup,
@@ -1504,6 +1504,28 @@ function cachedUsage(messages, completionText) {
   };
 }
 
+/**
+ * Decide whether the caller's <env> block should be lifted into the
+ * proto-level tool_calling_section for this request.
+ *
+ * #209: weak models (claude-5-fable-*) return an empty completion
+ * (0 text / 0 thinking / 0 tool_calls) whenever a caller <env> block is
+ * lifted alongside tools. Users reproduced this and a non-fable control
+ * with the identical payload works, so the lift is fable-toxic and buys
+ * nothing there (its planner idles rather than using the facts). Skip the
+ * lift for the weak-model family; every other model is unchanged.
+ *
+ * Only relevant on the emulation path (native tool models don't build the
+ * proto preamble). WINDSURFAPI_ENV_LIFT=0 is a global escape hatch that
+ * disables the lift for every model.
+ */
+export function shouldLiftCallerEnv(modelKey, { emulateTools, env = process.env } = {}) {
+  if (!emulateTools) return false;
+  if (String(env.WINDSURFAPI_ENV_LIFT ?? '1').trim().toLowerCase() === '0') return false;
+  if (isWeakEmulationModel(modelKey)) return false;
+  return true;
+}
+
 export function applyToolPreambleBudget(tools, toolChoice, callerEnv = '', opts = {}) {
   const modelKey = opts.modelKey || null;
   const provider = opts.provider || null;
@@ -2852,7 +2874,12 @@ async function _handleChatCompletionsInner(body, context = {}) {
   // the proto-level system slot so Cascade's authoritative planner system
   // prompt can no longer override them with /tmp/windsurf-workspace
   // priors. See extractCallerEnvironment() above for the parser.
-  const callerEnv = emulateTools ? extractCallerEnvironment(messages) : '';
+  //
+  // #209: skip the env-lift for weak models (fable) that idle to an empty
+  // completion when a caller <env> block rides into the tool_calling_section.
+  // See shouldLiftCallerEnv() for the rationale + escape hatch.
+  const callerEnv = shouldLiftCallerEnv(routingModelKey, { emulateTools })
+    ? extractCallerEnvironment(messages) : '';
   let toolPreamble = '';
   let preambleTier = null;
   let toolPreambleBudget = null;
