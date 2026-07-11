@@ -1299,9 +1299,21 @@ function createCaptureRes(translator, realRes) {
   };
   return {
     writableEnded: false,
+    _disconnected: false, // set by _clientDisconnected(); gates write() feed work
     headersSent: false,
     writeHead() { this.headersSent = true; },
     write(chunk) {
+      // Client already gone: skip all work. _clientDisconnected() fires 'close'
+      // but DELIBERATELY does not set writableEnded (so chat.js's close handler
+      // sees an un-ended stream and takes the abort path) — so we can't gate on
+      // writableEnded here. Use the independent _disconnected flag instead:
+      // between disconnect and the upstream abort actually landing, the upstream
+      // may trickle more chunks, and without this short-circuit translator.feed()
+      // below would keep parsing them into a translator that's about to be
+      // discarded (wasted CPU + post-disconnect state churn). (external audit
+      // 2026-07-12, flaw 2). Non-critical, but clean. Does NOT touch the
+      // writableEnded semantics _clientDisconnected relies on.
+      if (this._disconnected) return true;
       // chat.js writes SSE heartbeat comments (`: ping\n\n`) every 15s
       // while Cascade is slow-polling its trajectory. The translator
       // only parses `data:` lines, so pings are silently dropped —
@@ -1328,7 +1340,9 @@ function createCaptureRes(translator, realRes) {
     },
     // Fire 'close' without marking writableEnded=true so chat.js's
     // close handler sees an un-ended stream and triggers its abort path.
-    _clientDisconnected() { fire('close'); },
+    // Set an INDEPENDENT _disconnected flag (not writableEnded — that would
+    // suppress the abort path) so write() can skip post-disconnect feed work.
+    _clientDisconnected() { this._disconnected = true; fire('close'); },
     on(event, cb) {
       if (!listeners.has(event)) listeners.set(event, []);
       listeners.get(event).push(cb);

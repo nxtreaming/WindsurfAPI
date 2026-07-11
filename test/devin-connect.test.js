@@ -775,7 +775,11 @@ describe('streamChat abort / preconditions', () => {
             deadlineMs: 50,     // absolute deadline must fire first
           })) { /* drain */ }
         })(),
-        (err) => err.code === 'TIMEOUT' && /deadline/.test(err.message),
+        // audit flaw 1: the absolute deadline throws its OWN code
+        // (DEADLINE_EXCEEDED, non-retryable), distinct from the idle-silence
+        // 'TIMEOUT' (retryable) — so a hung-full-window upstream is surfaced
+        // immediately instead of replayed for another ~600s.
+        (err) => err.code === 'DEADLINE_EXCEEDED' && /deadline/.test(err.message),
       );
       assert.ok(Date.now() - t0 < 5000, 'ended promptly via the absolute deadline');
       assert.equal(destroyed, true, 'destroyed the hung request');
@@ -790,6 +794,16 @@ describe('isRetryable', () => {
     for (const code of ['ECONNRESET', 'ETIMEDOUT', 'TIMEOUT', 'EPIPE']) {
       assert.equal(isRetryable({ code }), true, code);
     }
+  });
+  it('retries idle TIMEOUT but NOT DEADLINE_EXCEEDED (audit flaw 1)', () => {
+    // Idle timeout (120s of silence) is often a transient upstream stall → a
+    // same-token replay is worth it, so 'TIMEOUT' is retryable.
+    assert.equal(isRetryable({ code: 'TIMEOUT' }), true);
+    // Absolute wall-clock deadline (upstream hung the full 600s window) has its
+    // OWN code and is deliberately NOT retryable — a replay would run another
+    // full idle+deadline cycle against the same stuck upstream (~2× wall-clock,
+    // ~1200s) and almost always fail again. Surface immediately instead.
+    assert.equal(isRetryable({ code: 'DEADLINE_EXCEEDED' }), false);
   });
   it('retries server "unavailable" but NOT RATE_LIMITED or internal', () => {
     assert.equal(isRetryable({ code: 'unavailable' }), true);

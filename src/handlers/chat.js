@@ -374,6 +374,11 @@ export function connectErrorToHttp(code) {
     case 'CONTENT_BLOCKED': return { status: 400, type: 'invalid_request_error' };
     case 'NO_TOKEN': return { status: 401, type: 'authentication_error' };
     case 'TIMEOUT': return { status: 504, type: 'timeout_error' };
+    // Absolute wall-clock deadline (upstream hung the full window). Same 504
+    // surface as an idle TIMEOUT, but a DISTINCT code so it is NOT in
+    // RETRYABLE_CODES — the stream replay gate must not re-run a doomed ≈2×
+    // cycle against the same stuck upstream (external audit 2026-07-12, flaw 1).
+    case 'DEADLINE_EXCEEDED': return { status: 504, type: 'timeout_error' };
     default: return { status: 502, type: 'upstream_error' };
   }
 }

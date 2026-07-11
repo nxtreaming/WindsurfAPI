@@ -1789,7 +1789,16 @@ export async function* streamChat({
   // request pinning an account's _inflight slot.
   const deadlineTimer = setTimeout(() => {
     req.destroy();
-    if (!streamError) streamError = Object.assign(new Error(`DEVIN_CONNECT: absolute deadline ${absoluteDeadlineMs}ms exceeded`), { code: 'TIMEOUT' });
+    // DEADLINE_EXCEEDED is deliberately DISTINCT from the idle 'TIMEOUT' above.
+    // Idle timeout (120s of silence) is often a transient upstream stall worth a
+    // same-token replay, so 'TIMEOUT' is in RETRYABLE_CODES. But this absolute
+    // wall-clock deadline means the upstream has been hung for the full window
+    // (600s) — a replay just runs another full idle+deadline cycle against the
+    // SAME stuck upstream (≈2× wall-clock, ~1200s to finally error), almost
+    // always failing again. Give it its own non-retryable code so the stream
+    // replay gate (chat.js isConnectRetryable) surfaces it immediately instead
+    // of doubling the user's wait. (external audit 2026-07-12, flaw 1)
+    if (!streamError) streamError = Object.assign(new Error(`DEVIN_CONNECT: absolute deadline ${absoluteDeadlineMs}ms exceeded`), { code: 'DEADLINE_EXCEEDED' });
     done = true;
     pump();
   }, absoluteDeadlineMs);

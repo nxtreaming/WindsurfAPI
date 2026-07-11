@@ -178,6 +178,17 @@ describe('connectErrorToHttp — UPSTREAM_INTERNAL mapping', () => {
       status: 401, type: 'authentication_error',
     });
   });
+
+  it('DEADLINE_EXCEEDED maps to 504 timeout_error, same surface as idle TIMEOUT (audit flaw 1)', () => {
+    // Distinct code (not retryable) but the client-facing surface matches an
+    // idle TIMEOUT — both are "the request timed out" from the caller's view.
+    assert.deepEqual(connectErrorToHttp('DEADLINE_EXCEEDED'), {
+      status: 504, type: 'timeout_error',
+    });
+    assert.deepEqual(connectErrorToHttp('TIMEOUT'), {
+      status: 504, type: 'timeout_error',
+    });
+  });
 });
 
 // CONTENT_BLOCKED (2026-07-10, live-confirmed) — upstream `permission_denied` with
