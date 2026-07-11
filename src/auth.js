@@ -1736,7 +1736,7 @@ function degradedServeEnabled() { return getBreakerTunable('degradedServe'); }
 // so quarantining the sole pro account produced a pool-wide blackout for every
 // paid model (opus/sonnet): the connect preflight isAllRateLimited(null,
 // paidSelector) saw only the (now-cooled) pro account as eligible → 429. That
-// is exactly the Claude-Code 1ms-429 lockout (see .workflow-results/
+// is exactly the Claude-Code 1ms-429 lockout (see docs-internal/workflow-results/
 // PLAN-429-MITIGATION). A peer only counts as a real fallback when it can serve
 // AT LEAST what `account` serves — i.e. its tier bucket is same-or-higher.
 //

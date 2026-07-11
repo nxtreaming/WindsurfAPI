@@ -3,7 +3,7 @@
  *
  * GetChatMessageRequest.model_selector (proto field #21) takes a STRING selector,
  * not the Cascade modelUid/enum. The full catalog was frame-captured from a live
- * GetCliModelConfigs response (see .workflow-results/devin-protobuf/
+ * GetCliModelConfigs response (see docs-internal/workflow-results/devin-protobuf/
  * model-catalog-CAPTURED.md and memory: devin-getchatmessage-wire-calibrated-
  * 2026-06-30). This maps the OpenAI-style model names a client sends onto the
  * verified upstream selectors.
@@ -95,7 +95,7 @@ const SELECTOR_MAP = new Map(Object.entries({
   'kimi-k2-7': 'kimi-k2-7',
 
   // ── Paid roster confirmed reachable 2026-07-05 (teams token, direct-selector
-  // probe, .workflow-results/paid-live-2026-07-05/) ── each maps a catalog family
+  // probe, docs-internal/workflow-results/paid-live-2026-07-05/) ── each maps a catalog family
   // alias to its -medium (or base/low) default; all targets are in the refreshed
   // 105-model catalog snapshot. See RESULTS.md §2 for the reachability matrix.
   'claude-5-fable': 'claude-5-fable-medium',

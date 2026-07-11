@@ -48,7 +48,7 @@ const chatEnabled = argv.has('--chat') || process.env.PROBE_CHAT === '1';
 const baseUrl = (process.env.BASE_URL || 'http://127.0.0.1:3003').replace(/\/+$/, '');
 const apiKey = process.env.API_KEY || process.env.WINDSURFAPI_API_KEY || '';
 const model = process.env.PROBE_MODEL || 'gemini-2.5-flash';
-const outFile = process.env.PROBE_OUT || '.workflow-results/cascade-survival.jsonl';
+const outFile = process.env.PROBE_OUT || 'docs-internal/workflow-results/cascade-survival.jsonl';
 const timeoutMs = Math.max(5_000, Number(process.env.PROBE_TIMEOUT_MS || 60_000));
 
 if (dryRun) {

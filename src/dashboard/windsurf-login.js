@@ -38,7 +38,7 @@ const WINDSURF_POST_AUTH_URL_NEW = `${WINDSURF_BACKEND_SEAT_BASE}/WindsurfPostAu
 const WINDSURF_ONE_TIME_TOKEN_URL_NEW = `${WINDSURF_BACKEND_SEAT_BASE}/GetOneTimeAuthToken`;
 
 // ─── Second-host fallback: app.devin.ai (opt-in, OFF by default) ──────────
-// The OAuth feasibility study (.workflow-results/oauth-relogin-study/
+// The OAuth feasibility study (docs-internal/workflow-results/oauth-relogin-study/
 // FEASIBILITY-BLUEPRINT.md §6 + tool-github-oauth-totp.md §1.1) found the
 // leaked Windsurf account-switcher drives app.devin.ai/api/auth1/{connections,
 // password/login} as the SAME Auth1 mechanism we hit on windsurf.com/_devin-auth,
@@ -574,7 +574,7 @@ async function windsurfLoginViaAuth1(email, password, fingerprint, proxy) {
 // app.devin.ai into OUR WindsurfPostAuth (windsurf.com/_backend or
 // server.self-serve.windsurf.com) and getting a usable `devin-session-token$`
 // back — has NOT been exercised against a live account. The study
-// (.workflow-results/oauth-relogin-study/FEASIBILITY-BLUEPRINT.md §1.2/§5.3,
+// (docs-internal/workflow-results/oauth-relogin-study/FEASIBILITY-BLUEPRINT.md §1.2/§5.3,
 // tool-github-oauth-totp.md §1.1) establishes only that both hosts share the
 // SAME Auth1 family statically; "same family" does NOT prove our PostAuth
 // exchanger accepts a token sourced from the other host. This must be

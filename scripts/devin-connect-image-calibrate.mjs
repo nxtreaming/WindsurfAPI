@@ -51,7 +51,7 @@ const RED_DOT_PNG =
 
 /**
  * Evidence-ordered candidate tags, narrowed from the reverse-engineering in
- * .workflow-results/devin-protobuf/P2-apiserver-methods-fields.md §2.2:
+ * docs-internal/workflow-results/devin-protobuf/P2-apiserver-methods-fields.md §2.2:
  *   - ChatMessageInner declared field order is
  *     `message_id, role, images, tool_call_id, ..., content, thinking` and a
  *     second binary variant orders it `message_id, role, content, images, ...`.

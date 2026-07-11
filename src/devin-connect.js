@@ -879,7 +879,7 @@ function parseBillingTagMap(env = process.env) {
 // Native tool-call DECODE (GROUNDWORK, opt-in via DEVIN_CONNECT_TOOL_CALL_TAGS).
 //
 // The response carries `delta_tool_calls` (repeated ChatToolCall). Per the
-// reverse-engineering (NW1: .workflow-results/native-tool-wire/NATIVE-WIRE-FIELDS.md
+// reverse-engineering (NW1: docs-internal/workflow-results/native-tool-wire/NATIVE-WIRE-FIELDS.md
 // §1.2/§2, sourced from the devin.exe prost declaration string at
 // strings-ascii.txt:249887) the ChatToolCall struct is, with [verified] FIELD NAMES:
 //   ChatToolCall {

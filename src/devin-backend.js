@@ -8,7 +8,7 @@
  *
  * SCOPE OF THIS SCAFFOLD: only the VERIFIED protocol surface is implemented.
  * Verified facts come from dao-devin-export v1.4.3 source + official docs and are
- * recorded in .workflow-results/REF-devin-backend-protocol.md. Everything verified
+ * recorded in docs-internal/workflow-results/REF-devin-backend-protocol.md. Everything verified
  * here is READ-ONLY (auth probe + list/detail/event/org reads). The WRITE surface a
  * real reverse-proxy needs (create-session + send-prompt) is NOT present in any
  * verified source, so it is left as explicit TODO stubs that throw — never faked.

@@ -40,7 +40,10 @@ bugsy/
 windsurf-grpc/
 *.db
 
-# internal dev notes — not for distribution
+# internal dev notes — not for distribution.
+# All AI/handoff/dev docs live in docs-internal/ (folder is git-ignored).
+# Root keeps only README*.md + LICENSE (public GitHub face) + CLAUDE.md.
+docs-internal/
 CLAUDE.md
 AGENTS.md
 GEMINI.md
@@ -49,7 +52,7 @@ HANDOFF.md
 .devin-connect-forward-plan.md
 .devin-connect-next-plan.md
 .devin-connect-annotations.json
-# external reference repos — audited for reference, NOT our code, never distribute
+# external reference repos — deleted 2026-07-11; guard against re-clone
 AIClient-2-API/
 copilot2api-go/
 .cursorrules
@@ -67,6 +70,9 @@ stats.json
 *.pem
 .docker-data/
 PR-FLOW.md
+# workflow analysis output — moved into docs-internal/workflow-results/ on 2026-07-11
+# (docs-internal/ is already ignored above). Legacy line kept as a guard in case
+# a script re-creates .workflow-results/ at the root.
 .workflow-results/
 .paid1-session.env
 # Free-account login/session envs (tokens + credentials) — never commit
