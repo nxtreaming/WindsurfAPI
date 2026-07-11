@@ -103,6 +103,30 @@ describe('cacheKey', () => {
       cacheKey({ ...base, max_completion_tokens: 500 })
     );
   });
+
+  it('audit #10: logit_bias key order does not split the cache slot', () => {
+    // Same token-id→bias map, different key insertion order. JSON.stringify
+    // preserves insertion order, so without stable-key normalization these two
+    // structurally-identical requests hashed to different keys and missed each
+    // other's cached response (never wrong data, just a wasted slot + halved
+    // hit rate). stableClone() sorts object keys before serialization.
+    const base = { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] };
+    const a = { ...base, logit_bias: { '100': 1, '50256': -100, '9': 5 } };
+    const b = { ...base, logit_bias: { '50256': -100, '9': 5, '100': 1 } };
+    assert.equal(cacheKey(a), cacheKey(b), 'permuted-but-equal logit_bias must share a slot');
+  });
+
+  it('audit #10: genuinely different logit_bias still keys apart', () => {
+    // The normalization must not over-collapse — a different bias value is a
+    // different generation and must still miss.
+    const base = { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] };
+    assert.notEqual(
+      cacheKey({ ...base, logit_bias: { '100': 1 } }),
+      cacheKey({ ...base, logit_bias: { '100': 2 } })
+    );
+    // presence vs absence also keys apart
+    assert.notEqual(cacheKey({ ...base, logit_bias: { '100': 1 } }), cacheKey(base));
+  });
 });
 
 describe('cacheGet / cacheSet', () => {

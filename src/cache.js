@@ -97,6 +97,22 @@ function normalizeBinary(messages) {
   });
 }
 
+// Deep, key-sorted clone so structurally-equal objects serialize to the same
+// string regardless of key insertion order. JSON.stringify preserves insertion
+// order, so `{"50256":-100,"100":1}` and `{"100":1,"50256":-100}` — the SAME
+// logit_bias map — hashed to different cache keys and split the slot, silently
+// halving the hit rate (never wrong data, just a miss). Arrays keep their order
+// (order is semantic there); only object keys are sorted. (audit #10)
+function stableClone(value) {
+  if (Array.isArray(value)) return value.map(stableClone);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value).sort()) out[k] = stableClone(value[k]);
+    return out;
+  }
+  return value;
+}
+
 function normalize(body) {
   return {
     model: body.model || '',
@@ -128,7 +144,9 @@ function normalize(body) {
     seed: body.seed ?? null,
     frequency_penalty: body.frequency_penalty ?? null,
     presence_penalty: body.presence_penalty ?? null,
-    logit_bias: body.logit_bias || null,
+    // logit_bias is a token-id→bias map with no canonical key order; sort keys
+    // so two key-order-permuted-but-equal maps land in the same cache slot (#10).
+    logit_bias: body.logit_bias ? stableClone(body.logit_bias) : null,
     n: body.n ?? null,
   };
 }
