@@ -2998,7 +2998,17 @@ export function validateApiKey(key) {
       if (typeof v === 'string') effectiveKey = v;
     } catch { /* keep env fallback */ }
   }
-  if (!effectiveKey) return isLocalBindHost(_bindHost);
+  // M1 (Grok audit): no API_KEY configured used to fail OPEN on a local bind —
+  // but "local bind" is not "no proxy": behind a same-host reverse proxy
+  // (openresty → 127.0.0.1) the bind is local for everyone, so this silently
+  // ran the whole gateway unauthenticated. Now fail CLOSED by default; running
+  // with no key is an explicit opt-in (WINDSURFAPI_ALLOW_UNAUTHENTICATED=1) for
+  // genuine local/dev use — and even then only on a local bind (never expose an
+  // unauthenticated gateway on a public bind). The Windows exe auto-generates an
+  // API_KEY on first run, so it never reaches this path.
+  if (!effectiveKey) {
+    return process.env.WINDSURFAPI_ALLOW_UNAUTHENTICATED === '1' && isLocalBindHost(_bindHost);
+  }
   if (!key) return false;
   return safeEqualString(key, effectiveKey);
 }
@@ -3181,6 +3191,14 @@ export function emitNoAuthWarnings(bindHost = '0.0.0.0') {
   // instead of a second, narrower regex that could drift from it.
   if (isLocalBindHost(bindHost) && process.env.TRUST_PROXY_X_FORWARDED_FOR !== '1') {
     log.warn('AUTH: dashboard bound to loopback with X-Forwarded-For trust OFF. Behind a reverse proxy, brute-force lockout buckets all clients as 127.0.0.1 (one bad actor can lock everyone, including you). If a proxy fronts this, set TRUST_PROXY_X_FORWARDED_FOR=1 and TRUST_PROXY_HOPS=<n> so lockout keys on the real client IP.');
+    // M3 (Grok audit): the same misconfig (loopback bind, XFF trust off) is what
+    // makes a same-host reverse proxy present every remote client as 127.0.0.1.
+    // If the apiKey-as-dashboard-password convenience is ALSO opted in, that
+    // means a remote client holding the shared chat key could open the panel.
+    // Warn explicitly so the two risks aren't conflated with the generic notice.
+    if (process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD === '1') {
+      log.warn('AUTH: DASHBOARD_ALLOW_API_KEY_AS_PASSWORD=1 with XFF trust OFF behind a proxy — a remote client presenting the chat API key could pass as a local operator and open the dashboard. Set a real DASHBOARD_PASSWORD, or enable TRUST_PROXY_X_FORWARDED_FOR=1 so the local-client check is trustworthy.');
+    }
   }
 
   if (!apiOpen && !dashboardOpen) return;

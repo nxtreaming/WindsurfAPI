@@ -27,7 +27,7 @@ import { handleGemini, parseGeminiPath } from './handlers/gemini.js';
 import { handleResponses } from './handlers/responses.js';
 import { handleModels } from './handlers/models.js';
 import { resolveModel, getModelInfo } from './models.js';
-import { handleDashboardApi, parseProxyUrl, validateProxyHost } from './dashboard/api.js';
+import { handleDashboardApi, parseProxyUrl, validateProxyHost, verifyAdminRequest } from './dashboard/api.js';
 import { setAccountProxy } from './dashboard/proxy-config.js';
 import { config, log } from './config.js';
 import { getVersionInfo } from './version.js';
@@ -360,7 +360,25 @@ async function route(req, res) {
   // ─── Auth management (admin — gated by API key above) ──
 
   if (path === '/auth/status') {
+    // Chat-key-visible summary: authenticated + counts only, NO email list.
+    // (Grok H1: listing/adding/deleting accounts requires operator auth below.)
     return json(res, 200, { authenticated: isAuthenticated(), ...getAccountCount() });
+  }
+
+  // H1 (Grok audit): account-pool management (list emails / add / delete) is an
+  // OPERATOR action, not a chat action. A shared chat API key must NOT let any
+  // caller run the pool. These endpoints now require dashboard-operator auth
+  // (dashboard password, or the opt-in localhost apiKey fallback) IN ADDITION to
+  // having passed the chat-key gate above. A bare chat key → 403.
+  const isAccountMgmt = path === '/auth/accounts'
+    || path.startsWith('/auth/accounts/')
+    || (path === '/auth/login' && method === 'POST');
+  if (isAccountMgmt && !verifyAdminRequest(req)) {
+    return json(res, 403, { error: {
+      message: 'Account-pool management (list/add/delete accounts) requires operator authentication. Send the dashboard password via the `x-dashboard-password` header (set DASHBOARD_PASSWORD, or use the dashboard UI). A chat API key alone is not sufficient.',
+      type: 'auth_error',
+      code: 'admin_required',
+    } });
   }
 
   if (path === '/auth/accounts' && method === 'GET') {

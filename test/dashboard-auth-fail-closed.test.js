@@ -74,14 +74,27 @@ describe('dashboard checkAuth — fail closed on public bind without password (a
     assert.equal(wrong.captured.status, 401, 'API_KEY must NOT be accepted as DASHBOARD_PASSWORD');
   });
 
-  it('localhost bind + no DASHBOARD_PASSWORD → API_KEY fallback still works (single-user dev)', async () => {
+  it('localhost bind + no DASHBOARD_PASSWORD + opt-in → API_KEY fallback works (single-user dev)', async () => {
+    process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD = '1';
     config.apiKey = 'sk-local-key';
     config.dashboardPassword = '';
     configureBindHost('127.0.0.1');
 
     const { res, captured } = mkRes();
     await handleDashboardApi('GET', '/config', {}, mkReq({ 'x-dashboard-password': 'sk-local-key' }, '127.0.0.1'), res);
-    assert.equal(captured.status, 200, 'localhost bind + loopback peer keeps the convenience fallback');
+    assert.equal(captured.status, 200, 'localhost bind + loopback peer keeps the fallback when opted in (H2)');
+    delete process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD;
+  });
+
+  it('localhost bind + no DASHBOARD_PASSWORD + NO opt-in → API_KEY fallback denied (H2 default)', async () => {
+    delete process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD;
+    config.apiKey = 'sk-local-key';
+    config.dashboardPassword = '';
+    configureBindHost('127.0.0.1');
+
+    const { res, captured } = mkRes();
+    await handleDashboardApi('GET', '/config', {}, mkReq({ 'x-dashboard-password': 'sk-local-key' }, '127.0.0.1'), res);
+    assert.equal(captured.status, 401, 'apiKey-as-password is off by default now');
   });
 
   it('localhost bind + nothing configured → fail-closed by default; opens only with DASHBOARD_ALLOW_NO_AUTH=1 (AUTH-1)', async () => {

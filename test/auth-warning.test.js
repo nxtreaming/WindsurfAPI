@@ -34,8 +34,16 @@ describe('shouldEmitNoAuthWarning', () => {
     assert.equal(shouldEmitNoAuthWarning('0.0.0.0', true), false);
   });
 
-  it('allows missing API_KEY only on local binds', () => {
+  it('missing API_KEY fails closed by default; opt-in allows it only on local binds (M1)', () => {
     config.apiKey = '';
+    // Default (no opt-in): fail closed even on a local bind — "local bind" is
+    // not "no proxy" (same-host reverse proxy makes every peer look loopback).
+    delete process.env.WINDSURFAPI_ALLOW_UNAUTHENTICATED;
+    configureBindHost('127.0.0.1');
+    assert.equal(validateApiKey(''), false);
+
+    // Opt-in: allowed, but ONLY on a local bind.
+    process.env.WINDSURFAPI_ALLOW_UNAUTHENTICATED = '1';
     configureBindHost('127.0.0.1');
     assert.equal(validateApiKey(''), true);
     configureBindHost('::1');
@@ -45,7 +53,7 @@ describe('shouldEmitNoAuthWarning', () => {
     configureBindHost('::ffff:127.0.0.1');
     assert.equal(validateApiKey(''), true);
     // Empty bindHost is "didn't configure / Node defaults to all interfaces"
-    // which is non-local. Must fail closed.
+    // which is non-local. Must fail closed even with opt-in.
     configureBindHost('');
     assert.equal(validateApiKey(''), false);
 
@@ -53,6 +61,7 @@ describe('shouldEmitNoAuthWarning', () => {
     assert.equal(validateApiKey(''), false);
     configureBindHost('192.168.1.10');
     assert.equal(validateApiKey('anything'), false);
+    delete process.env.WINDSURFAPI_ALLOW_UNAUTHENTICATED;
   });
 
   it('compares configured API_KEY without default-allowing missing or wrong keys', () => {

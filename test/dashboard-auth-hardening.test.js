@@ -127,25 +127,41 @@ describe('audit #1: apiKey/no-auth dashboard fallback requires a verified-LOCAL 
     assert.equal(captured.status, 401, 'proxied remote client (via XFF) must NOT auth via the apiKey fallback despite a loopback socket peer');
   });
 
-  it('SAME-HOST PROXY: loopback socket peer + loopback real client (XFF) + chat apiKey → 200', async () => {
-    // A genuinely local client whose real IP (via XFF) is loopback still works.
+  it('SAME-HOST PROXY: loopback socket peer + loopback real client (XFF) + chat apiKey + opt-in → 200', async () => {
+    // A genuinely local client whose real IP (via XFF) is loopback still works
+    // — but only when the apiKey-as-password convenience is explicitly opted in
+    // (H2: default OFF now).
     withXff();
+    process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD = '1';
     config.apiKey = 'sk-chat-shared-key';
     config.dashboardPassword = '';
     configureBindHost('127.0.0.1');
     const { res, captured } = mkRes();
     const req = { headers: { 'x-dashboard-password': 'sk-chat-shared-key', 'x-forwarded-for': '127.0.0.1' }, socket: { remoteAddress: '127.0.0.1' } };
     await handleDashboardApi('GET', '/config', {}, req, res);
-    assert.equal(captured.status, 200, 'verified-local client (XFF loopback) keeps the convenience');
+    assert.equal(captured.status, 200, 'verified-local client (XFF loopback) keeps the opt-in convenience');
+    delete process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD;
   });
 
-  it('loopback bind + loopback peer + chat apiKey as password → 200 (genuine local convenience)', async () => {
+  it('loopback bind + loopback peer + chat apiKey as password + opt-in → 200 (genuine local convenience)', async () => {
+    process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD = '1';
     config.apiKey = 'sk-chat-shared-key';
     config.dashboardPassword = '';
     configureBindHost('127.0.0.1');
     const { res, captured } = mkRes();
     await handleDashboardApi('GET', '/config', {}, mkReq({ 'x-dashboard-password': 'sk-chat-shared-key' }, '127.0.0.1'), res);
-    assert.equal(captured.status, 200, 'loopback peer with the correct apiKey is still accepted');
+    assert.equal(captured.status, 200, 'loopback peer with the correct apiKey is accepted when opted in');
+    delete process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD;
+  });
+
+  it('H2: loopback peer + chat apiKey as password but NO opt-in → 401 (default hardened)', async () => {
+    delete process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD;
+    config.apiKey = 'sk-chat-shared-key';
+    config.dashboardPassword = '';
+    configureBindHost('127.0.0.1');
+    const { res, captured } = mkRes();
+    await handleDashboardApi('GET', '/config', {}, mkReq({ 'x-dashboard-password': 'sk-chat-shared-key' }, '127.0.0.1'), res);
+    assert.equal(captured.status, 401, 'apiKey-as-password must be denied by default without opt-in');
   });
 
   it('a configured DASHBOARD_PASSWORD is unaffected (remote peer with correct password still works)', async () => {

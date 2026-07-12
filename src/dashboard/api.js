@@ -258,14 +258,36 @@ function checkAuth(req) {
   const clientIp = dashboardClientIp(req);
   if (isLocalBindHost() && isLoopbackAddress(clientIp)) {
     const effectiveApiKey = getEffectiveApiKey();
-    if (effectiveApiKey) return safeEqualString(pw, effectiveApiKey);
+    // H2 (Grok audit): the "chat API key doubles as the dashboard password"
+    // convenience is now OPT-IN (default OFF). Even from a verified-local
+    // client it's a footgun — a shared chat key becomes full operator access,
+    // and a reverse-proxy misconfig (XFF trust off) can make a remote client
+    // look loopback. Operators who genuinely want the single-secret local
+    // convenience must set DASHBOARD_ALLOW_API_KEY_AS_PASSWORD=1. Otherwise the
+    // dashboard requires a real DASHBOARD_PASSWORD.
+    if (effectiveApiKey && process.env.DASHBOARD_ALLOW_API_KEY_AS_PASSWORD === '1') {
+      return safeEqualString(pw, effectiveApiKey);
+    }
     // AUTH-1: localhost with NO secret configured used to be treated as
     // authenticated for every caller. Default is now fail-closed; operators who
     // relied on the old open-local convenience must opt in with
     // DASHBOARD_ALLOW_NO_AUTH=1 (and even then only from a verified-local client).
-    return process.env.DASHBOARD_ALLOW_NO_AUTH === '1';
+    if (!effectiveApiKey) return process.env.DASHBOARD_ALLOW_NO_AUTH === '1';
+    return false;
   }
   return false;
+}
+
+// H1 (Grok audit): reusable "is this an authenticated dashboard operator?"
+// check for the account-management endpoints in server.js (/auth/login,
+// /auth/accounts, DELETE /auth/accounts/:id). Those used to sit behind only the
+// chat API key, so any chat client could add/list/delete pool accounts. They
+// now require the SAME auth the dashboard does (dashboard password, or the
+// opt-in localhost apiKey fallback) — a shared chat key alone is no longer
+// enough to act as operator. Thin wrapper so the resolution order stays single-
+// sourced in checkAuth.
+export function verifyAdminRequest(req) {
+  return checkAuth(req);
 }
 
 // AUTH-1: explicit re-auth for the reveal-key endpoint. The caller must

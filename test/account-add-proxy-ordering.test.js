@@ -193,7 +193,7 @@ describe('POST /accounts proxy ordering (regression for PR #90 follow-up)', () =
     _resetLockoutForTests();
     setRuntimeApiKey('');
     setRuntimeDashboardPassword('');
-    config.dashboardPassword = '';
+    config.dashboardPassword = 'admin-pw';  // H1: /auth/login now needs operator auth
     config.apiKey = 'test-admin-key';
     config.allowPrivateProxyHosts = false;
     config.host = '127.0.0.1';
@@ -214,7 +214,7 @@ describe('POST /accounts proxy ordering (regression for PR #90 follow-up)', () =
           label,
           proxy: 'http://127.0.0.1:8080',
         },
-        { authorization: 'Bearer test-admin-key' }
+        { authorization: 'Bearer test-admin-key', 'x-dashboard-password': 'admin-pw' }
       );
       const after = snapshotAccountIds();
 
