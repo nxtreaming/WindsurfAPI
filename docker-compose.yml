@@ -50,6 +50,11 @@ services:
       # that runtime-config / model-access / cache / cascade pool stay
       # replica-local until externalized. See issue #67 / #69.
       REPLICA_ISOLATE: 0
+      # 429 死循环缓解(F1/F2/F3)自 2026-07-12 起代码默认已开启,Docker 无需
+      # 显式设置即生效:degradedServe=on / 裸429冷却=15s / 客户端 Retry-After
+      # 地板=30s。要回退或微调,在 .env 里设 WINDSURFAPI_DEGRADED_SERVE=0 /
+      # WINDSURFAPI_RL_BURST_MS=300000 / WINDSURFAPI_RL_CLIENT_BACKOFF_FLOOR_MS=0
+      # (见 .env.example 的 "429 缓解" 段),或用面板设置页热调。
     # Do not expose ports directly when load balancing
     expose:
       - "3003"
