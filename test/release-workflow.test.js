@@ -31,7 +31,10 @@ describe('release workflow', () => {
     const winExe = jobBlock('windows-exe');
     assert.match(winExe, /\bneeds:\s*test\b/);
     assert.match(winExe, /runs-on:\s*windows-latest/);
-    assert.match(winExe, /pkg \. --targets node22-win-x64/);
+    // esbuild bundles the ESM graph to one CJS file, then pkg wraps it (pkg
+    // can't ingest the raw "type":"module" tree — emits CJS into ESM scope).
+    assert.match(winExe, /npm run build:bundle/);
+    assert.match(winExe, /pkg src\/_bundle\.cjs .*node22-win-x64/);
     // Must smoke-check the exe actually boots + serves the dashboard, so a
     // broken asset bundle fails the release rather than shipping a dead exe.
     assert.match(winExe, /\/health/);

@@ -128,20 +128,23 @@ jobs:
           # runner → fails). node22 is LTS and has multiple prebuilts.
           node-version: '22'
 
-      # Build the single .exe with @yao-pkg/pkg. The Windows runner has the
-      # network + toolchain to fetch (or, worst case, compile) the pkg base
-      # binary — neither is reliably available on a dev box. Zero runtime deps,
-      # so nothing to `npm ci`; pkg reads the `pkg` config block in package.json
-      # (assets = the dashboard html/i18n/data files server.js reads at runtime,
-      # served from pkg's snapshot FS so no source change is needed).
+      # Build the single .exe. pkg can't ingest our ESM tree directly:
+      # package.json has "type":"module", so pkg loads each src/*.js as ESM but
+      # its bytecode/fallback path emits CommonJS (module.exports) → "module is
+      # not defined in ES module scope" at boot (seen in rc1/rc2). Fix: esbuild
+      # first bundles the whole ESM graph into ONE CommonJS file (src/_bundle.cjs)
+      # — no per-file ESM/CJS ambiguity — then pkg wraps that single CJS file.
+      # The bundle keeps import.meta.url meaningful via a banner shim
+      # (pathToFileURL(__filename)), so config.js/server.js/devin-connect-models
+      # still resolve dashboard/ + data/ relative to the bundle; pkg's `assets`
+      # (in package.json) map those files into the snapshot at the same paths.
+      # The Windows runner has the network to fetch pkg's node22 base binary
+      # (node20 has none → don't use it). Zero runtime deps, so no `npm ci`.
       - name: Build windsurfapi.exe
         run: |
-          npm i -g @yao-pkg/pkg@6.21.0
-          # --fallback-to-source: our ESM entry can't be turned into V8 bytecode
-          # by pkg (server.js/config.js warn "Failed to make bytecode"); ship
-          # those as plain source inside the snapshot instead of failing/booting
-          # a half-compiled exe.
-          pkg . --targets node22-win-x64 --fallback-to-source --output dist-windows/windsurfapi.exe
+          npm i -g @yao-pkg/pkg@6.21.0 esbuild
+          npm run build:bundle
+          pkg src/_bundle.cjs --config package.json --targets node22-win-x64 --output dist-windows/windsurfapi.exe
 
       - name: Smoke-check the exe boots
         shell: pwsh

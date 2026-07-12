@@ -24,16 +24,17 @@
     "probe:web-search": "node scripts/web-search-direct-probe.mjs",
     "sync:contributors": "node scripts/sync-docs-contributors.mjs",
     "secret-scan": "node scripts/secret-scan.mjs",
-    "build:exe": "pkg . --targets node22-win-x64 --fallback-to-source --output dist-windows/windsurfapi.exe"
+    "build:bundle": "esbuild src/index.js --bundle --platform=node --format=cjs --target=node22 --outfile=src/_bundle.cjs --external:node:* --define:import.meta.url=__WA_IMPORT_META_URL__ --banner:js=\"const __WA_IMPORT_META_URL__=require('node:url').pathToFileURL(__filename).href;\"",
+    "build:exe": "npm run build:bundle && pkg src/_bundle.cjs --config package.json --targets node22-win-x64 --output dist-windows/windsurfapi.exe"
   },
   "pkg": {
-    "scripts": ["src/**/*.js"],
     "assets": [
       "src/dashboard/index.html",
       "src/dashboard/index-sketch.html",
       "src/dashboard/i18n/*.json",
       "src/dashboard/data/*.json",
-      "src/vendor/**/*"
+      "src/data/*.json",
+      "package.json"
     ],
     "targets": ["node22-win-x64"],
     "outputPath": "dist-windows"

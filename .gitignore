@@ -99,3 +99,7 @@ docs/*.bak
 2026-*dprojectwindsurfapiclaudetxt*.txt
 *这个是*.txt
 *这也是*.txt
+
+# Windows single-exe build artifacts (built in CI, never committed)
+/dist-windows/
+/src/_bundle.cjs
