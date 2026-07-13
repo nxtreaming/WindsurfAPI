@@ -3996,6 +3996,7 @@ docker compose up -d --force-recreate</pre>
         return;
       }
       this.password = pw;
+      this.bumpAuthEpoch();
       localStorage.setItem('dp', pw);
       await this.init();
     } catch (e) {
@@ -4034,12 +4035,36 @@ docker compose up -d --force-recreate</pre>
     if (loaders[panel]) this[loaders[panel]]();
   },
 
+  // Bump on any auth-context change (login / logout / 401). A response that
+  // arrives after the epoch changed is stale (belongs to the previous password)
+  // and is discarded so it can't paint data into a freshly-switched session.
+  bumpAuthEpoch() { this._authEpoch = (this._authEpoch || 0) + 1; },
+
   async api(method, path, body) {
+    // In-flight GET dedupe: concurrent identical GETs (common when several panel
+    // sections mount at once) share ONE fetch instead of hammering the endpoint.
+    // Only GETs are deduped — writes must always execute.
+    if (method === 'GET' && !body) {
+      this._inflightGets ||= new Map();
+      if (this._inflightGets.has(path)) return this._inflightGets.get(path);
+      const promise = this._apiRaw(method, path, body).finally(() => this._inflightGets.delete(path));
+      this._inflightGets.set(path, promise);
+      return promise;
+    }
+    return this._apiRaw(method, path, body);
+  },
+
+  async _apiRaw(method, path, body) {
+    const epochAtStart = this._authEpoch || 0;
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (this.password) opts.headers['X-Dashboard-Password'] = this.password;
     if (body) opts.body = JSON.stringify(body);
     try {
       const r = await fetch('/dashboard/api' + path, opts);
+      // Stale-response guard: the auth context changed while this was in flight
+      // (password switch / logout) — drop the result so it can't overwrite the
+      // new session's view with data fetched under the old credential.
+      if ((this._authEpoch || 0) !== epochAtStart) return {};
       const data = await r.json().catch(() => ({}));
       // 429 = IP brute-force lockout. Blindly continuing (esp. the 15s/30s poll
       // loops + the ~dozen parallel calls each panel fires) hammers the banned
@@ -4055,6 +4080,7 @@ docker compose up -d --force-recreate</pre>
         // The password is persisted in localStorage 'dp' (see :3180) — clearing
         // sessionStorage would miss it and the bad password would survive reload.
         this.password = null;
+        this.bumpAuthEpoch();
         try { localStorage.removeItem('dp'); } catch {}
         this.stopAllPolls();
         document.getElementById('login-overlay').classList.remove('hidden');
@@ -9326,6 +9352,7 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
       // is persisted in localStorage 'dp' — clear that (not sessionStorage).
       if (field === 'dashboardPassword' && !cleared) {
         this.password = null;
+        this.bumpAuthEpoch();
         try { localStorage.removeItem('dp'); } catch {}
         setTimeout(() => location.reload(), 800);
         return;
