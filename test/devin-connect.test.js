@@ -719,6 +719,31 @@ describe('classifyUpstreamError', () => {
     assert.equal(classifyUpstreamError('permission_denied', 'permission_denied').code, 'UNAUTHORIZED');
     assert.equal(classifyUpstreamError('invalid session token', null, 401).code, 'UNAUTHORIZED');
   });
+  it('rel-01: an explicit HTTP 429 wins over capacity-ish body text → RATE_LIMITED, not CAPACITY', () => {
+    // The bug: a 429 whose body contains "try again later" / "capacity" / "overloaded"
+    // used to hit the text-based CAPACITY branch first (retryable + 60s cooldown), so
+    // the pool retried straight back into a real rate limit. An explicit 429 status is
+    // an authoritative account-scoped throttle → RATE_LIMITED (non-retryable).
+    assert.equal(classifyUpstreamError('Please try again later.', null, 429).code, 'RATE_LIMITED');
+    assert.equal(classifyUpstreamError('the model is currently overloaded', null, 429).code, 'RATE_LIMITED');
+    assert.equal(classifyUpstreamError('high demand, try again later', null, 429).code, 'RATE_LIMITED');
+    // gRPC resource_exhausted code is the same authoritative signal.
+    assert.equal(classifyUpstreamError('capacity', 'resource_exhausted').code, 'RATE_LIMITED');
+  });
+  it('rel-01: capacity text WITHOUT a 429 still reads as CAPACITY (401/403/503 shell unchanged)', () => {
+    // The rel-01 fix must NOT over-reach: the live-observed "high demand" blip
+    // arrives in a 401/403/503 shell (NOT 429) and must stay retryable CAPACITY.
+    assert.equal(classifyUpstreamError("We're currently facing high demand for this model. Please try again later.", null, 401).code, 'CAPACITY');
+    assert.equal(classifyUpstreamError('the model is currently overloaded', null, 503).code, 'CAPACITY');
+    assert.equal(classifyUpstreamError('server is busy, try again later').code, 'CAPACITY');
+  });
+  it('rel-01: hard "Resets in: 3h" rate limit still parses its window (matched before the 429 guard)', () => {
+    // The explicit-reset branch runs before the new bare-429 guard, so a body with a
+    // Go-duration reset window keeps producing resetMs for the real cooldown.
+    const r = classifyUpstreamError('Reached message rate limit for this model. Please try again later. Resets in: 3h0m0s', null, 429);
+    assert.equal(r.code, 'RATE_LIMITED');
+    assert.equal(r.resetMs, 3 * 60 * 60 * 1000);
+  });
 });
 
 describe('streamChat abort / preconditions', () => {
@@ -787,6 +812,72 @@ describe('streamChat abort / preconditions', () => {
       __setRequestImpl(null);
     }
   });
+});
+
+describe('wire-01: multi-byte UTF-8 split across frames', () => {
+  afterEach(() => __setRequestImpl(null));
+
+  // Build a raw protobuf `content` field (#3, wire type 2) from ARBITRARY bytes —
+  // used to place HALF of a multi-byte UTF-8 sequence in one frame. writeStringField
+  // can't do this (it takes a JS string, which can't hold a lone continuation byte).
+  function rawContentField(bytes) {
+    const len = [];
+    let n = bytes.length;
+    do { let b = n & 0x7f; n >>>= 7; if (n) b |= 0x80; len.push(b); } while (n);
+    return Buffer.concat([Buffer.from([0x1a]), Buffer.from(len), Buffer.from(bytes)]);
+  }
+
+  async function drainContent() {
+    let text = '';
+    for await (const ev of streamChat({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'swe-1-6-slow',
+      token: TOKEN,
+    })) {
+      if (ev.type === 'content') text += ev.text;
+    }
+    return text;
+  }
+
+  it('reassembles a Chinese char whose 3 UTF-8 bytes straddle two frames (no U+FFFD)', async () => {
+    // '你' = E4 BD A0. Put E4 in frame 1, BD A0 in frame 2. Per-frame toString('utf8')
+    // would yield '�' + '��'; the StringDecoder holds E4 until BD A0.
+    const full = Buffer.from('你好世界', 'utf8');
+    const cut = 1; // split after the first byte of '你'
+    __setRequestImpl(mkTransport([full.subarray(0, cut), full.subarray(cut)]));
+    const text = await drainContent();
+    assert.equal(text, '你好世界');
+    assert.ok(!text.includes('�'), 'no replacement chars');
+  });
+
+  it('reassembles an emoji (4-byte) split mid-sequence', async () => {
+    const full = Buffer.from('🚀ok', 'utf8'); // F0 9F 9A 80 6F 6B
+    __setRequestImpl(mkTransport([full.subarray(0, 2), full.subarray(2)]));
+    const text = await drainContent();
+    assert.equal(text, '🚀ok');
+  });
+
+  it('a whole char in one frame is unaffected (regression guard)', async () => {
+    __setRequestImpl(mkTransport([Buffer.from('中文', 'utf8')]));
+    assert.equal(await drainContent(), '中文');
+  });
+
+  // Transport builder shared by the cases above. streamChat calls
+  // requestImpl(opts, cb) and expects cb(res) with a streaming response.
+  function mkTransport(byteChunks) {
+    return (_opts, cb) => {
+      const req = { on() { return req; }, setTimeout() { return req; }, write() {}, end() {}, destroy() {} };
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      if (cb) cb(res);
+      queueMicrotask(() => {
+        for (const b of byteChunks) res.emit('data', wrapEnvelope(rawContentField(b), { compress: false }));
+        res.emit('data', endOfStreamEnvelope());
+        res.emit('end');
+      });
+      return req;
+    };
+  }
 });
 
 describe('isRetryable', () => {

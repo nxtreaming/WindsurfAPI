@@ -27,6 +27,7 @@
  */
 
 import https from 'https';
+import { StringDecoder } from 'string_decoder';
 import { randomUUID, randomBytes } from 'crypto';
 import * as _wireFs from 'fs';
 import * as _wirePath from 'path';
@@ -1282,6 +1283,15 @@ export function decodeFrame(payload, opts = {}) {
   const out = {
     content: content ? content.value.toString('utf8') : '',
     reasoning: reasoning ? reasoning.value.toString('utf8') : '',
+    // wire-01: raw content/reasoning bytes for the streaming path. A multi-byte
+    // UTF-8 char (Chinese / emoji) can be split across two frames; decoding each
+    // frame in isolation with toString('utf8') turns the split char into U+FFFD
+    // garbage. The streaming consumer feeds these Buffers through a StringDecoder
+    // that holds an incomplete trailing sequence until the next frame completes
+    // it. Non-streaming callers keep using the per-frame `content` string above
+    // (a whole message in one frame decodes identically either way).
+    contentBytes: content ? content.value : null,
+    reasoningBytes: reasoning ? reasoning.value : null,
     finish: finish ? finish.value : null,
     usage,
     billing,
@@ -1410,6 +1420,18 @@ export function classifyUpstreamError(text, code = null, status = null) {
     const out = { code: 'RATE_LIMITED', message: body || 'DEVIN_CONNECT: message rate limit reached' };
     if (resetMs != null) out.resetMs = resetMs;
     return out;
+  }
+  // rel-01: an EXPLICIT HTTP 429 (or gRPC resource_exhausted) is an authoritative
+  // account-scoped rate-limit signal from the transport layer — it MUST win over
+  // the text-based CAPACITY heuristic below. Otherwise a 429 whose body happens to
+  // contain "try again later" / "capacity" / "overloaded" gets read as CAPACITY
+  // (retryable + a short 60s cooldown), so the pool retries straight back into a
+  // real rate limit, amplifying load and under-cooling the account. Classifying it
+  // as RATE_LIMITED (non-retryable) lets the cross-account failover + cooldown do
+  // their job. The hard "...Resets in: 3h" branch above already ran, so any
+  // parseable reset window has been honored; a bare 429 falls here.
+  if (status === 429 || code === 'resource_exhausted') {
+    return { code: 'RATE_LIMITED', message: body || 'DEVIN_CONNECT: rate limited (HTTP 429)' };
   }
   // Capacity / high-demand throttling. Observed live in a 401/403 shell:
   // "We're currently facing high demand for this model. Please try again later."
@@ -1648,6 +1670,11 @@ export async function* streamChat({
   let lastActualModel = null;
   let lastSignature = null;
   const nativeToolCalls = [];
+  // wire-01: StringDecoder holds an incomplete trailing multi-byte UTF-8 sequence
+  // between frames, so a Chinese char / emoji split across two frames decodes
+  // whole instead of becoming U+FFFD on each half. One decoder per text stream.
+  const contentDecoder = new StringDecoder('utf8');
+  const reasoningDecoder = new StringDecoder('utf8');
   const pump = () => { if (wake) { const w = wake; wake = null; w(); } };
 
   const req = requestImpl({
@@ -1721,7 +1748,10 @@ export async function* streamChat({
           pump();
           return;
         }
-        const { content, reasoning, finish, usage, billing, metaDump, frameDump, subDump, actualModel, toolCalls, signature } = decodeFrame(frame.payload, { billingTags, dumpMeta, actualModelTag, toolCallTags, signatureTags, toolNames });
+        const { contentBytes, reasoningBytes, finish, usage, billing, metaDump, frameDump, subDump, actualModel, toolCalls, signature } = decodeFrame(frame.payload, { billingTags, dumpMeta, actualModelTag, toolCallTags, signatureTags, toolNames });
+        // wire-01: decode across frame boundaries so split multi-byte chars survive.
+        const content = contentBytes ? contentDecoder.write(contentBytes) : '';
+        const reasoning = reasoningBytes ? reasoningDecoder.write(reasoningBytes) : '';
         // Calibration (DEBUG-gated, default OFF): emit the raw frame payload hex
         // so a probe can re-decode it WIDE — the production frameDump/metaDump
         // only collect wireType 0/2 and miss wt1(double)/wt5(float), which is
@@ -1814,6 +1844,14 @@ export async function* streamChat({
       if (queue.length) { yield queue.shift(); continue; }
       if (streamError) throw streamError;
       if (done) {
+        // wire-01: flush any trailing bytes the decoders were holding (an
+        // incomplete multi-byte sequence at the very end of the stream). Normally
+        // empty — the upstream doesn't split the final char — but flushing keeps
+        // the invariant that all received bytes are emitted.
+        const tailContent = contentDecoder.end();
+        const tailReasoning = reasoningDecoder.end();
+        if (tailReasoning) yield { type: 'reasoning', text: tailReasoning };
+        if (tailContent) yield { type: 'content', text: tailContent };
         // One terminal event carrying finish_reason + usage for the caller to
         // close out an OpenAI-shaped response.
         yield {
