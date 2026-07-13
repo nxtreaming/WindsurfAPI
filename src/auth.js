@@ -2444,6 +2444,10 @@ function publicAccount(a, now, { view = 'full' } = {}) {
     // switching accounts does NOT help (the model itself is busy). Surfacing both
     // lets an operator tell "change account" from "wait / try another model".
     capacityThrottled: !!(a._modelRateLimits && Object.values(a._modelRateLimits).some(until => until > now)),
+    // Account-wide quota dry-well (out of credit; self-healing at quotaResetAt).
+    // Distinct from rateLimited — surfaced so the pool-event notifier can tell
+    // "out of quota" from "throttled".
+    quotaCooled: !!(a.quotaResetAt && a.quotaResetAt > now),
   };
   if (view === 'summary') return base;
 

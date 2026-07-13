@@ -3667,6 +3667,17 @@ const App = {
     }, intervalMs);
   },
 
+  // Panel-independent poller: runs regardless of which panel is active (only
+  // skips when the tab is hidden). For cross-cutting heartbeats like the
+  // pool-event notifier that must observe the pool no matter where the user is.
+  pollGlobal(key, fn, intervalMs) {
+    if (this.pollers[key]) clearInterval(this.pollers[key]);
+    this.pollers[key] = setInterval(() => {
+      if (document.hidden) return;
+      fn();
+    }, intervalMs);
+  },
+
   // Idempotently upgrade native <select> / <input type=number> into themed
   // custom controls. The native element STAYS in the DOM as the source of truth
   // (.value / data-name / onchange all keep working); the custom UI only mirrors
@@ -3953,6 +3964,10 @@ docker compose up -d --force-recreate</pre>
     const hash = location.hash.slice(1);
     if (hash) this.navigate(hash);
     else this.loadOverview();
+    // Panel-independent pool-event heartbeat (rides zero extra upstream cost —
+    // reads the in-memory pool via /pool-events). Surfaces cooldown/429/quota
+    // flapping as deduped, transition-only toasts regardless of active panel.
+    this.startPoolEvents();
   },
 
   async login() {
@@ -4120,6 +4135,84 @@ docker compose up -d --force-recreate</pre>
     t.addEventListener('click', dismiss);   // click to dismiss early
     // Errors linger longer than successes so users can actually read them.
     setTimeout(dismiss, type === 'error' ? 8000 : 3000);
+  },
+
+  // ─── Pool-event notifications ─────────────────
+  // INLINE MIRROR of src/dashboard/pool-events.js (single-file "just open it"
+  // constraint). src/dashboard/check-inline-sync.js asserts the two stay in sync —
+  // edit BOTH. Turns the /pool-events heartbeat into deduped, transition-only
+  // toasts (healthy ↔ cooling ↔ capacity ↔ quota ↔ disabled).
+  _poolAccountState(a) {
+    if (!a) return 'unknown';
+    if (a.status === 'disabled' || a.status === 'banned') return 'disabled';
+    if (a.status === 'error') return 'error';
+    if (a.quotaCooled) return 'quota';
+    if (a.rateLimited) return 'rate_limited';
+    if (a.capacityThrottled) return 'capacity';
+    return 'active';
+  },
+  _poolClassify(from, to) {
+    if (from === to) return null;
+    if (to === 'active') return { kind: 'recovered', severity: 'success' };
+    const sev = (to === 'disabled' || to === 'quota') ? 'error' : 'warn';
+    return { kind: to, severity: sev };
+  },
+  _poolCollapse(events, collapseAt) {
+    const byKind = new Map();
+    for (const e of events) {
+      if (!byKind.has(e.kind)) byKind.set(e.kind, []);
+      byKind.get(e.kind).push(e);
+    }
+    const out = [];
+    for (const [kind, group] of byKind) {
+      if (group.length >= collapseAt) out.push({ type: 'summary', kind, severity: group[0].severity, count: group.length });
+      else out.push(...group);
+    }
+    return out;
+  },
+  _poolPush(snapshot, now) {
+    const st = this._poolState;
+    const list = Array.isArray(snapshot) ? snapshot : [];
+    if (!st.primed) {
+      for (const a of list) st.lastState.set(a.id, this._poolAccountState(a));
+      st.primed = true;
+      return [];
+    }
+    const raw = [];
+    const seen = new Set();
+    for (const a of list) {
+      if (!a || a.id == null) continue;
+      seen.add(a.id);
+      const to = this._poolAccountState(a);
+      const from = st.lastState.get(a.id) ?? 'active';
+      st.lastState.set(a.id, to);
+      const t = this._poolClassify(from, to);
+      if (!t) continue;
+      if (st.lastEmitAt.has(a.id) && now - st.lastEmitAt.get(a.id) < st.backoffMs) continue;
+      st.lastEmitAt.set(a.id, now);
+      raw.push({ type: 'account', id: a.id, ref: a.ref || a.id, kind: t.kind, severity: t.severity, from, to });
+    }
+    for (const id of [...st.lastState.keys()]) {
+      if (!seen.has(id)) { st.lastState.delete(id); st.lastEmitAt.delete(id); }
+    }
+    return this._poolCollapse(raw, st.collapseAt);
+  },
+  startPoolEvents() {
+    this._poolState = { primed: false, lastState: new Map(), lastEmitAt: new Map(), backoffMs: 60000, collapseAt: 3 };
+    const tick = async () => {
+      if (!this.password && !this._noAuth) return;
+      const r = await this.api('GET', '/pool-events').catch(() => null);
+      if (!r || !Array.isArray(r.accounts)) return;
+      const events = this._poolPush(r.accounts, Date.now());
+      for (const e of events) {
+        const sev = e.severity === 'success' ? 'success' : (e.severity === 'error' ? 'error' : 'info');
+        const kindKey = (e.type === 'summary' ? 'summary_' : '') + e.kind;
+        const msg = I18n.t('notify.pool.' + kindKey, e.type === 'summary' ? { count: e.count } : { ref: e.ref });
+        this.toast(msg, sev);
+      }
+    };
+    this.pollGlobal('pool-events', tick, 20000);
+    tick();  // prime immediately (silent first tick establishes baseline)
   },
 
   // ─── Modal helpers ───────────────────────────

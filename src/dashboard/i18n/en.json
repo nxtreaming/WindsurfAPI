@@ -1154,6 +1154,22 @@
       "allRefreshed": "All account credits refreshed: {{ok}} success / {{fail}} failed"
     }
   },
+  "notify": {
+    "pool": {
+      "rate_limited": "Account {{ref}} rate-limited (account-wide)",
+      "capacity": "Account {{ref}}: model temporarily busy",
+      "quota": "Account {{ref}} out of quota",
+      "disabled": "Account {{ref}} disabled",
+      "error": "Account {{ref}} errored",
+      "recovered": "Account {{ref}} recovered",
+      "summary_rate_limited": "{{count}} accounts rate-limited",
+      "summary_capacity": "{{count}} accounts hit model-busy",
+      "summary_quota": "{{count}} accounts out of quota",
+      "summary_disabled": "{{count}} accounts disabled",
+      "summary_error": "{{count}} accounts errored",
+      "summary_recovered": "{{count}} accounts recovered"
+    }
+  },
   "log": {
     "empty": "No logs yet",
     "emptyFiltered": "No logs match the current filter",

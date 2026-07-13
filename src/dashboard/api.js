@@ -555,6 +555,22 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
     });
   }
 
+  // Lightweight pool snapshot for the dashboard's pool-event notifier. Reads the
+  // in-memory pool only (zero upstream cost) and returns just the per-account
+  // state flags the client diffs into transition toasts (healthy ↔ cooling ↔
+  // capacity ↔ quota ↔ disabled). Summary view keeps the payload tiny.
+  if (subpath === '/pool-events' && method === 'GET') {
+    const accounts = getAccountList({ view: 'summary' }).map(a => ({
+      id: a.id,
+      ref: a.keyPrefix || a.id,
+      status: a.status,
+      rateLimited: !!a.rateLimited,
+      capacityThrottled: !!a.capacityThrottled,
+      quotaCooled: !!a.quotaCooled,
+    }));
+    return json(res, 200, { accounts, ts: Date.now() });
+  }
+
   // ─── Experimental features ────────────────────────────
   if (subpath === '/experimental' && method === 'GET') {
     return json(res, 200, { flags: getExperimental(), tunables: getTunables(), conversationPool: convPoolStats() });
