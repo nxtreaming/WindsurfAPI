@@ -120,6 +120,20 @@
     "prev": "上一页",
     "next": "下一页"
   },
+  "batchOps": {
+    "selected": "已选 {{count}} 个",
+    "selectAll": "全选",
+    "enable": "启用",
+    "disable": "禁用",
+    "refresh": "刷新额度",
+    "probe": "探测",
+    "delete": "删除",
+    "clear": "清除选择",
+    "confirmDeleteTitle": "删除 {{count}} 个账号",
+    "confirmDeleteDesc": "将从账号池移除 {{count}} 个账号，不可撤销。确定继续？",
+    "running": "正在处理 {{count}} 个账号…",
+    "done": "{{ok}} 成功 / {{fail}} 失败"
+  },
   "reveal": {
     "confirmPrompt": "重新输入 Dashboard 密码以揭示此 Key(若未设 Dashboard 密码则输入 API Key):",
     "wrongPassword": "二次验证失败——密码错误,未揭示 Key。"

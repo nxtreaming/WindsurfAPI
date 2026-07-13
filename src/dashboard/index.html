@@ -503,6 +503,8 @@ code {
 @keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
 .skeleton-line { height: 1em; margin: 6px 0; }
 .skeleton-card { height: 96px; }
+.batch-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-bottom: 10px; background: var(--surface, rgba(255,255,255,.04)); border: 1px solid var(--border, rgba(255,255,255,.08)); border-radius: 8px; }
+.batch-bar .batch-count { font-size: 13px; font-weight: 600; color: var(--accent, #60a5fa); }
 .card.accent .card-value { color: var(--accent); }
 .card.success .card-value { color: var(--success); }
 .card.warn .card-value { color: var(--warn); }
@@ -2648,9 +2650,20 @@ tbody tr:hover td { background: var(--surface-2); }
         </div>
       </div>
       <div class="section-body tight">
+        <div id="accounts-batch-bar" class="batch-bar" style="display:none">
+          <span class="batch-count" id="accounts-batch-count"></span>
+          <div class="btn-group">
+            <button class="btn btn-ghost btn-xs" onclick="App.batchAccountOp('enable')" data-i18n="batchOps.enable">启用</button>
+            <button class="btn btn-ghost btn-xs" onclick="App.batchAccountOp('disable')" data-i18n="batchOps.disable">禁用</button>
+            <button class="btn btn-ghost btn-xs" onclick="App.batchAccountOp('refresh')" data-i18n="batchOps.refresh">刷新额度</button>
+            <button class="btn btn-ghost btn-xs" onclick="App.batchAccountOp('probe')" data-i18n="batchOps.probe">探测</button>
+            <button class="btn btn-ghost btn-xs" style="color:var(--error)" onclick="App.batchAccountOp('delete')" data-i18n="batchOps.delete">删除</button>
+            <button class="btn btn-ghost btn-xs" onclick="App.clearAccountSelection()" data-i18n="batchOps.clear">清除选择</button>
+          </div>
+        </div>
         <div class="table-wrap">
           <table id="accounts-table">
-            <thead><tr><th data-i18n="table.header.id">ID</th><th data-i18n="table.header.label">标签</th><th data-i18n="table.header.tier">层级</th><th data-i18n="table.header.rpm">RPM</th><th class="th-help" data-i18n="table.header.quota" data-i18n-title="creditsBar.columnTooltip" title="配额使用情况&#10;&#10;日 — 每日高级请求剩余百分比（重置频繁）&#10;周 — 每周高级请求剩余百分比（Trial 账号重点看这条）&#10;&#10;数值越高 = 剩余越多 = 越安全&#10;悬停单条进度条可查看重置时间">配额</th><th data-i18n="table.header.models">可用模型</th><th data-i18n="table.header.status">状态</th><th data-i18n="table.header.error">错误</th><th data-i18n="table.header.lastUsed">最后使用</th><th data-i18n="table.header.key">Key</th><th data-i18n="table.header.action">操作</th></tr></thead>
+            <thead><tr><th style="width:28px;text-align:center"><input type="checkbox" id="accounts-select-all" aria-label="Select all" onchange="App.toggleSelectAllAccounts(this.checked)"></th><th data-i18n="table.header.id">ID</th><th data-i18n="table.header.label">标签</th><th data-i18n="table.header.tier">层级</th><th data-i18n="table.header.rpm">RPM</th><th class="th-help" data-i18n="table.header.quota" data-i18n-title="creditsBar.columnTooltip" title="配额使用情况&#10;&#10;日 — 每日高级请求剩余百分比（重置频繁）&#10;周 — 每周高级请求剩余百分比（Trial 账号重点看这条）&#10;&#10;数值越高 = 剩余越多 = 越安全&#10;悬停单条进度条可查看重置时间">配额</th><th data-i18n="table.header.models">可用模型</th><th data-i18n="table.header.status">状态</th><th data-i18n="table.header.error">错误</th><th data-i18n="table.header.lastUsed">最后使用</th><th data-i18n="table.header.key">Key</th><th data-i18n="table.header.action">操作</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -6768,8 +6781,10 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
       const hl = healthLevel(a);
       const hlColor = bandColor[hl];
       const hlLabel = I18n.t('status.healthLevel.' + hl);
+      const isSelected = this._selectedAccounts?.has(a.id);
       return `
       <tr${isExpanded ? ' class="expanded"' : ''}>
+        <td style="text-align:center"><input type="checkbox" class="acct-select" data-id="${this.escJsAttr(a.id)}"${isSelected ? ' checked' : ''} aria-label="Select ${this.esc(a.id)}" onchange="App.toggleAccountSelect('${this.escJsAttr(a.id)}',this.checked)"></td>
         <td style="box-shadow: inset 3px 0 0 ${hlColor};" title="${this.esc(hlLabel)}">
           <button class="expand-chevron ${isExpanded ? 'open' : ''}" onclick="App.toggleAccountDetail('${this.escJsAttr(a.id)}')" title="${I18n.t('account.detail.toggle')}" aria-label="${I18n.t('account.detail.toggle')}" aria-expanded="${isExpanded ? 'true' : 'false'}">▸</button>
           <code>${a.id}</code>
@@ -6801,8 +6816,8 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
             <button class="btn btn-ghost btn-xs" style="color:var(--error)" onclick="App.deleteAccount('${this.escJsAttr(a.id)}')">${I18n.t('action.delete')}</button>
           </div>
         </td>
-      </tr>${isExpanded ? `<tr class="account-detail-row"><td colspan="11">${this.renderAccountDetail(a)}</td></tr>` : ''}`;
-    }).join('') || `<tr class="empty-row"><td colspan="11">${I18n.t('table.empty.accounts')}</td></tr>`;
+      </tr>${isExpanded ? `<tr class="account-detail-row"><td colspan="12">${this.renderAccountDetail(a)}</td></tr>` : ''}`;
+    }).join('') || `<tr class="empty-row"><td colspan="12">${I18n.t('table.empty.accounts')}</td></tr>`;
   },
 
   _expandedAccounts: new Set(),
@@ -7469,6 +7484,62 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
     this.toast(I18n.t('account.tierSet', {tier: newTier.tier}), 'success');
     this.loadAccounts();
   },
+  // ─── Batch pool operations ────────────────────
+  toggleAccountSelect(id, checked) {
+    this._selectedAccounts ||= new Set();
+    if (checked) this._selectedAccounts.add(id); else this._selectedAccounts.delete(id);
+    this._updateBatchBar();
+  },
+  toggleSelectAllAccounts(checked) {
+    this._selectedAccounts ||= new Set();
+    document.querySelectorAll('#accounts-table .acct-select').forEach((cb) => {
+      cb.checked = checked;
+      if (checked) this._selectedAccounts.add(cb.dataset.id); else this._selectedAccounts.delete(cb.dataset.id);
+    });
+    this._updateBatchBar();
+  },
+  clearAccountSelection() {
+    this._selectedAccounts?.clear();
+    document.querySelectorAll('#accounts-table .acct-select, #accounts-select-all').forEach((cb) => { cb.checked = false; });
+    this._updateBatchBar();
+  },
+  _updateBatchBar() {
+    const n = this._selectedAccounts?.size || 0;
+    const bar = document.getElementById('accounts-batch-bar');
+    const cnt = document.getElementById('accounts-batch-count');
+    if (!bar) return;
+    bar.style.display = n > 0 ? 'flex' : 'none';
+    if (cnt) cnt.textContent = I18n.t('batchOps.selected', { count: n });
+  },
+  async batchAccountOp(op) {
+    const ids = [...(this._selectedAccounts || [])];
+    if (!ids.length) return;
+    if (op === 'delete') {
+      const ok = await this.confirm(
+        I18n.t('batchOps.confirmDeleteTitle', { count: ids.length }),
+        I18n.t('batchOps.confirmDeleteDesc', { count: ids.length }),
+        { danger: true, okText: I18n.t('action.delete') });
+      if (!ok) return;
+    }
+    this.toast(I18n.t('batchOps.running', { count: ids.length }), 'info');
+    let ok = 0, fail = 0;
+    // Serial to avoid hammering the pool + brute-force lockout on parallel writes.
+    for (const id of ids) {
+      try {
+        if (op === 'enable') await this.api('PATCH', `/accounts/${id}`, { status: 'active' });
+        else if (op === 'disable') await this.api('PATCH', `/accounts/${id}`, { status: 'disabled' });
+        else if (op === 'refresh') await this.api('POST', `/accounts/${id}/refresh-credits`, {});
+        else if (op === 'probe') await this.api('POST', `/accounts/${id}/probe`, {});
+        else if (op === 'delete') await this.api('DELETE', `/accounts/${id}`);
+        ok++;
+      } catch { fail++; }
+      this._accountDetails?.delete(id);
+    }
+    this.clearAccountSelection();
+    this.toast(I18n.t('batchOps.done', { ok, fail }), fail ? 'error' : 'success');
+    this.loadAccounts();
+  },
+
   async resetErrors(id) { await this.api('PATCH', `/accounts/${id}`, { resetErrors: true }); this._accountDetails?.delete(id); this.loadAccounts(); this.toast(I18n.t('account.resetErrors')); },
   async deleteAccount(id) {
     const ok = await this.confirm(I18n.t('modal.deleteAccount.title'), I18n.t('modal.deleteAccount.desc'), { danger: true, okText: I18n.t('action.delete') });

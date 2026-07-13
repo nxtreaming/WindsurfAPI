@@ -120,6 +120,20 @@
     "prev": "Prev",
     "next": "Next"
   },
+  "batchOps": {
+    "selected": "{{count}} selected",
+    "selectAll": "Select all",
+    "enable": "Enable",
+    "disable": "Disable",
+    "refresh": "Refresh credits",
+    "probe": "Probe",
+    "delete": "Delete",
+    "clear": "Clear selection",
+    "confirmDeleteTitle": "Delete {{count}} accounts",
+    "confirmDeleteDesc": "This removes {{count}} accounts from the pool. This cannot be undone. Continue?",
+    "running": "Processing {{count}} accounts…",
+    "done": "{{ok}} succeeded / {{fail}} failed"
+  },
   "reveal": {
     "confirmPrompt": "Re-enter the dashboard password to reveal this key (or the API key if no dashboard password is set):",
     "wrongPassword": "Re-auth failed — wrong password. Key not revealed."
