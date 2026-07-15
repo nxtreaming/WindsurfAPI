@@ -201,6 +201,39 @@ function shortHash(text) {
   return createHash('sha256').update(String(text || '')).digest('hex').slice(0, 16);
 }
 
+// v3.4.x — content-policy-block observability. The upstream content policy is
+// non-deterministic (same prompt blocks then passes), so we snapshot a small
+// sample at block time for later A/B by the operator. SECURITY: sample ONLY
+// system-role text — never user/tool content (avoids leaking user PII/tokens),
+// and never the raw tools array. Hash the full system text; sample first ~512B.
+function buildPolicyBlockSample(messages, model, account, traceId) {
+  let systemText = '';
+  if (Array.isArray(messages)) {
+    const parts = [];
+    for (const m of messages) {
+      if (!m || m.role !== 'system') continue;
+      const c = m.content;
+      if (typeof c === 'string') {
+        parts.push(c);
+      } else if (Array.isArray(c)) {
+        for (const blk of c) {
+          if (blk && blk.type === 'text' && typeof blk.text === 'string') parts.push(blk.text);
+        }
+      }
+    }
+    systemText = parts.join('\n');
+  }
+  const SAMPLE_BYTES = Number(process.env.POLICY_BLOCK_SAMPLE_BYTES) || 512;
+  return {
+    ts: Date.now(),
+    model,
+    account: account || null,
+    promptHash: shortHash(systemText),
+    promptSample: systemText.slice(0, SAMPLE_BYTES),
+    traceId: traceId || null,
+  };
+}
+
 // v2.0.55 (audit M2): salvage parser will accept any
 // `{"name":"X","arguments":{...}}` JSON it finds in model output. If a user
 // message contains a prompt-injection payload (and a non-Claude model
@@ -3604,7 +3637,7 @@ async function _handleChatCompletionsInner(body, context = {}) {
     // v2.0.61 (#113): policy_blocked → don't rotate accounts, return
     // immediately. The model refused the request, swapping accounts
     // gives the same refusal but burns more quota.
-    if (errType === 'policy_blocked') { recordPolicyBlocked(); return result; }
+    if (errType === 'policy_blocked') { recordPolicyBlocked(buildPolicyBlockSample(messages, displayModel, acct?.id || null, context.traceId || null)); return result; }
     // Rate limit: this account is done for this model, try the next one
     if (errType === 'rate_limit_exceeded') {
       recordRateLimited();
@@ -5288,7 +5321,7 @@ function streamResponse(id, created, model, modelKey, provider, messages, cascad
               }
             }
             if (isInternal) { reportInternalError(currentApiKey); err.isModelError = true; err.kind ||= 'transient_stall'; }
-            if (isPolicyBlocked) { recordPolicyBlocked(); err.isPolicyBlocked = true; err.isModelError = true; err.kind = 'policy_blocked'; }
+            if (isPolicyBlocked) { recordPolicyBlocked(buildPolicyBlockSample(messages, model, acct?.id || null, deps.context?.traceId || null)); err.isPolicyBlocked = true; err.isModelError = true; err.kind = 'policy_blocked'; }
             if (isTransport) { err.isModelError = true; err.kind ||= 'transient_stall'; }
             // v2.0.56 stream-path ban detection — same 2-strike logic as
             // non-stream. See nonStreamResponse for rationale, including the

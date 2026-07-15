@@ -105,6 +105,11 @@ const _state = {
   },
   // v2.0.91 — track upstream rejection/cooldown events
   policyBlockedCount: 0,
+  // v3.4.x — content-policy-block observability ring. The upstream content
+  // policy is non-deterministic (same prompt blocks then passes), so we
+  // capture a small system-prompt-only sample at block time for later A/B.
+  // Bounded ring, newest last; cap via POLICY_BLOCK_RING (default 50).
+  recentPolicyBlocks: [],
   rateLimitedCount: 0,
   // v2.0.148 — Credits spend dimension. creditsByHour/Day are keyed maps
   // { "<iso-hour|day>": creditsFloat } so the dashboard can chart spend over
@@ -321,6 +326,19 @@ export function importStats(snap, { mode = 'merge' } = {}) {
       _state.recentRequests.splice(0, _state.recentRequests.length - RECENT_REQ_CAP);
     }
   }
+  if (Array.isArray(src.recentPolicyBlocks)) {
+    if (!Array.isArray(_state.recentPolicyBlocks)) _state.recentPolicyBlocks = [];
+    const seen = new Set((_state.recentPolicyBlocks || []).map(r => `${r.ts}|${r.promptHash}`));
+    for (const r of src.recentPolicyBlocks) {
+      const id = `${r.ts}|${r.promptHash}`;
+      if (!seen.has(id)) { _state.recentPolicyBlocks.push(r); seen.add(id); }
+    }
+    _state.recentPolicyBlocks.sort((a, b) => a.ts - b.ts);
+    const CAP = Number(process.env.POLICY_BLOCK_RING) || 50;
+    if (_state.recentPolicyBlocks.length > CAP) {
+      _state.recentPolicyBlocks.splice(0, _state.recentPolicyBlocks.length - CAP);
+    }
+  }
   scheduleSave();
   return { ok: true, mode: 'merge' };
 }
@@ -343,6 +361,7 @@ export function resetStats() {
   _state.creditsByDay = {};
   _state.creditsByModel = {};
   _state.recentRequests = [];
+  _state.recentPolicyBlocks = [];
   _state.startedAt = Date.now();
   scheduleSave();
 }
@@ -376,8 +395,16 @@ export function recordTokenUsage(usage) {
   scheduleSave();
 }
 
-export function recordPolicyBlocked() {
+export function recordPolicyBlocked(sample = null) {
   _state.policyBlockedCount = (_state.policyBlockedCount || 0) + 1;
+  if (sample) {
+    if (!Array.isArray(_state.recentPolicyBlocks)) _state.recentPolicyBlocks = [];
+    _state.recentPolicyBlocks.push(sample);
+    const CAP = Number(process.env.POLICY_BLOCK_RING) || 50;
+    if (_state.recentPolicyBlocks.length > CAP) {
+      _state.recentPolicyBlocks.splice(0, _state.recentPolicyBlocks.length - CAP);
+    }
+  }
   scheduleSave();
 }
 
