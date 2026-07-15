@@ -222,6 +222,40 @@ async function runSuite(base) {
     return `${call.name}(${call.args})`;
   });
 
+  // 4b. Parameterless tool → arguments must still be PARSEABLE JSON (the
+  // vercel/ai#6687 case: Claude sends "" for a no-arg tool, which
+  // @ai-sdk/openai-compatible silently drops. The Cline compat layer normalizes
+  // it to "{}"). We can't force the model to pick this tool, so we only assert
+  // the invariant WHEN a tool_call is produced: whatever arguments arrive must
+  // JSON.parse. A gateway with the compat layer active can never emit "".
+  await check('parameterless tool → reassembled arguments are parseable (never "")', async () => {
+    const res = await post(base, '/v1/chat/completions', {
+      model: MODEL,
+      messages: [{ role: 'user', content: 'List the files in the current directory using the tool.' }],
+      tools: [{ type: 'function', function: {
+        name: 'list_files',
+        description: 'List files in the current directory. Takes no arguments.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      } }],
+      tool_choice: 'auto',
+      stream: true,
+    }, { stream: true });
+    const { events } = await readSSE(res);
+    let args = '';
+    let sawToolCall = false;
+    for (const e of events) {
+      for (const tc of (e.choices?.[0]?.delta?.tool_calls || [])) {
+        sawToolCall = true;
+        if (tc.function?.arguments) args += tc.function.arguments;
+      }
+    }
+    if (!sawToolCall) return 'model chose not to call the tool (invariant not exercised)';
+    // The critical assertion: arguments are NEVER the empty string, and always parse.
+    assert(args !== '', 'parameterless tool emitted empty-string arguments (@ai-sdk would drop it)');
+    JSON.parse(args);
+    return `arguments=${args}`;
+  });
+
   // 5. reasoning_effort passes through without a 4xx/5xx.
   await check('reasoning_effort passthrough does not error', async () => {
     const { status, json } = await post(base, '/v1/chat/completions', {
@@ -320,7 +354,14 @@ function startMock() {
           'cache-control': 'no-cache',
           connection: 'keep-alive',
         });
-        if (wantsTools) {
+        const toolName = body.tools?.[0]?.function?.name;
+        if (wantsTools && toolName === 'list_files') {
+          // Parameterless tool. A compat-active gateway normalizes the empty
+          // arguments Claude would send to "{}" — never emits "". The mock
+          // reflects that post-compat shape (a single "{}" arguments fragment).
+          res.write(sseChunk({ object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_lf', type: 'function', function: { name: 'list_files', arguments: '{}' } }] }, finish_reason: null }] }));
+          res.write(sseChunk({ object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }));
+        } else if (wantsTools) {
           // Split tool_call across frames to exercise reassembly.
           res.write(sseChunk({ object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_mock', type: 'function', function: { name: 'get_weather', arguments: '' } }] }, finish_reason: null }] }));
           res.write(sseChunk({ object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"city":' } }] }, finish_reason: null }] }));

@@ -30,6 +30,7 @@ import {
   getQuotaTunables, getQuotaOverrides, setQuotaTunables,
 } from '../runtime-config.js';
 import { poolStats as convPoolStats, poolClear as convPoolClear } from '../conversation-pool.js';
+import { getClineCompatStats } from '../handlers/cline-compat.js';
 import { getLogs, subscribeToLogs, unsubscribeFromLogs } from './logger.js';
 import { getProxyConfig, getProxyConfigMasked, setGlobalProxy, setAccountProxy, removeProxy, getEffectiveProxy } from './proxy-config.js';
 import { MODELS, MODEL_TIER_ACCESS as _TIER_TABLE, getTierModels as _getTierModels } from '../models.js';
@@ -593,6 +594,16 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
   if (subpath === '/experimental/conversation-pool' && method === 'DELETE') {
     const n = convPoolClear();
     return json(res, 200, { success: true, cleared: n });
+  }
+
+  // ─── Cline compatibility layer status ────────────────────
+  // enabled = the master experimental toggle (detection path); stats.argRepairs =
+  // how many tool-call arguments the compat layer has normalized since boot (both
+  // the /v1/cline/* namespace and the detection path feed this counter). The
+  // dedicated namespace works regardless of the toggle, so a nonzero counter with
+  // enabled:false just means a partner is hitting /v1/cline/*.
+  if (subpath === '/cline-compat' && method === 'GET') {
+    return json(res, 200, { enabled: !!getExperimental().clineCompat, stats: getClineCompatStats() });
   }
 
   // ─── System prompts (tool reinforcement, communication) ──

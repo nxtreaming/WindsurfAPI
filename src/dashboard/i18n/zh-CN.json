@@ -339,6 +339,15 @@
       "enable": "启用原生 tool_call",
       "hint": "默认关闭。开启前建议先对付费号发一发带工具的请求验证闭环。"
     },
+    "clineCompat": {
+      "title": "Cline 兼容模式",
+      "desc": "为 Cline 插件做原生级兼容。Cline 的 OpenAI Compatible provider 底层是 @ai-sdk/openai-compatible，对 tool_call 的 arguments 有 isParsableJson 门槛——参数串不是合法 JSON 就静默丢弃这次工具调用（Claude 对无参数工具会发空串）。开启后，识别为 Cline 的请求（按 User-Agent）在标准 /v1 端点会自动套用兼容垫片（tool_call 参数归一为合法 JSON）。专用端点 /v1/cline/*（如 /v1/cline/chat/completions）无论此开关是否开启都始终生效——命名空间本身就是显式选择。默认关闭，标准 /v1 对其他客户端保持字节等价。",
+      "enable": "启用 Cline 特征识别兼容",
+      "hint": "默认关闭。开启后按 User-Agent 识别 Cline 请求自动套兼容层；/v1/cline/* 专用端点不受此开关约束。",
+      "badgeOn": "Cline 兼容 ON",
+      "repairLabel": "已修复 tool_call 参数次数",
+      "repairHint": "（把空/坏 JSON 参数归一为 {} 的累计次数，防 @ai-sdk 静默丢工具）"
+    },
     "preflight": {
       "title": "发送前预检配额",
       "desc": "每次 chat 前先探一次 server.codeium.com 剩余配额,无额度账号直接快速失败,避免烧上游 429。代价是每请求多一次网络往返。",

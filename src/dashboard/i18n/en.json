@@ -331,6 +331,15 @@
       "enable": "Enable native tool_call",
       "hint": "Off by default. Before enabling, send a tools-carrying request to a paid account to verify the round-trip."
     },
+    "clineCompat": {
+      "title": "Cline compatibility mode",
+      "desc": "Native-grade compatibility for the Cline extension. Cline's OpenAI Compatible provider is built on @ai-sdk/openai-compatible, which gates every tool_call behind an isParsableJson check on the arguments string — if the arguments aren't valid JSON it silently drops the tool call (Claude sends an empty string for parameterless tools). When enabled, requests identified as Cline (by User-Agent) hitting the standard /v1 endpoint get the compat shims applied automatically (tool_call arguments normalized to valid JSON). The dedicated /v1/cline/* namespace (e.g. /v1/cline/chat/completions) applies the shims regardless of this toggle — the namespace itself is the explicit opt-in. Off by default; the standard /v1 path stays byte-identical for every other client.",
+      "enable": "Enable Cline detection compatibility",
+      "hint": "Off by default. When on, requests are matched to Cline by User-Agent and the compat layer is applied automatically; the /v1/cline/* dedicated endpoint is not gated by this toggle.",
+      "badgeOn": "Cline compat ON",
+      "repairLabel": "tool_call arguments repaired",
+      "repairHint": "(running count of empty/broken JSON arguments normalized to {}, preventing @ai-sdk from silently dropping the tool call)"
+    },
     "preflight": {
       "title": "Pre-flight quota probe",
       "desc": "Before each chat, probe server.codeium.com for remaining quota so requests to exhausted accounts fail fast instead of burning an upstream 429. Costs one extra round-trip per request.",

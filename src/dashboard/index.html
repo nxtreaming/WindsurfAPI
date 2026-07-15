@@ -3342,6 +3342,31 @@ tbody tr:hover td { background: var(--surface-2); }
     </div>
     <div class="section" style="margin-top:24px">
       <div class="section-header">
+        <div class="section-title" data-i18n="section.clineCompat.title">Cline 兼容模式</div>
+        <span class="badge badge-success" id="cline-compat-badge" style="display:none" data-i18n="section.clineCompat.badgeOn">Cline 兼容 ON</span>
+      </div>
+      <div class="section-body">
+        <div class="section-desc" style="margin-bottom:12px" data-i18n="section.clineCompat.desc">为 Cline 插件做原生级兼容。Cline 的 OpenAI Compatible provider 底层是 @ai-sdk/openai-compatible，对 tool_call 的 arguments 有 isParsableJson 门槛——参数串不是合法 JSON 就静默丢弃这次工具调用（Claude 对无参数工具会发空串）。开启后，识别为 Cline 的请求（按 User-Agent）在标准 /v1 端点会自动套用兼容垫片（tool_call 参数归一为合法 JSON）。专用端点 /v1/cline/*（如 /v1/cline/chat/completions）无论此开关是否开启都始终生效——命名空间本身就是显式选择。默认关闭，标准 /v1 对其他客户端保持字节等价。</div>
+        <div style="display:flex;align-items:center;gap:16px;padding:12px;background:var(--surface-2);border-radius:var(--radius)">
+          <label class="switch">
+            <input type="checkbox" id="exp-cline-compat" onchange="App.toggleExperimental('clineCompat', this.checked)">
+            <span class="switch-slider"></span>
+          </label>
+          <div>
+            <div style="font-weight:500" data-i18n="section.clineCompat.enable">启用 Cline 特征识别兼容</div>
+            <div class="text-sm text-muted" data-i18n="section.clineCompat.hint">默认关闭。开启后按 User-Agent 识别 Cline 请求自动套兼容层；/v1/cline/* 专用端点不受此开关约束。</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
+          <span class="text-sm text-muted" data-i18n="section.clineCompat.repairLabel">已修复 tool_call 参数次数</span>
+          <span class="badge" id="cline-compat-repairs" data-kpi>0</span>
+          <span class="text-sm text-muted" data-i18n="section.clineCompat.repairHint">（把空/坏 JSON 参数归一为 {} 的累计次数，防 @ai-sdk 静默丢工具）</span>
+          <button class="btn btn-ghost btn-xs" onclick="App.loadClineCompat()" data-i18n="action.refresh">刷新</button>
+        </div>
+      </div>
+    </div>
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
         <div class="section-title" data-i18n="section.preflight.title">发送前预检配额</div>
       </div>
       <div class="section-body">
@@ -9159,6 +9184,9 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
     if (cbStickyNoFallback) cbStickyNoFallback.checked = !!d.flags?.stickyNoFallback;
     const cbNativeTool = document.getElementById('exp-native-toolcall');
     if (cbNativeTool) cbNativeTool.checked = !!d.flags?.nativeToolCall;
+    const cbClineCompat = document.getElementById('exp-cline-compat');
+    if (cbClineCompat) cbClineCompat.checked = !!d.flags?.clineCompat;
+    this.loadClineCompat();
     const cbPf = document.getElementById('exp-preflight');
     if (cbPf) cbPf.checked = !!d.flags?.preflightRateLimit;
     // Reflect current skin cookie in the dropdown so reload state is visible.
@@ -9187,6 +9215,19 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
       </div>
     `;
 
+  },
+
+  // Cline compat status: master toggle reflected in the badge, and the running
+  // count of tool_call arguments the compat layer has repaired. The /v1/cline/*
+  // namespace feeds the counter regardless of the toggle, so a nonzero count
+  // with the toggle off just means a partner is on the dedicated endpoint.
+  async loadClineCompat() {
+    let d;
+    try { d = await this.api('GET', '/cline-compat'); } catch { return; }
+    const badge = document.getElementById('cline-compat-badge');
+    if (badge) badge.style.display = d.enabled ? '' : 'none';
+    const repairs = document.getElementById('cline-compat-repairs');
+    if (repairs) this._animateNumber(repairs, d.stats?.argRepairs || 0);
   },
 
   // System-prompts editor. Lives on the global Settings page (moved out of the

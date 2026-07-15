@@ -21,7 +21,7 @@ describe('cline-compat-verify (offline contract self-test)', () => {
       env: { ...process.env, CLINE_VERIFY_REAL: '', VERIFY_TIMEOUT_MS: '30000' },
     });
     assert.equal(r.status, 0, `verifier exited ${r.status}:\n${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /7\/7 checks passed/, `expected 7/7:\n${r.stdout}`);
+    assert.match(r.stdout, /8\/8 checks passed/, `expected 8/8:\n${r.stdout}`);
     assert.match(r.stdout, /All Cline contract checks passed/);
   });
 });
