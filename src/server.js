@@ -28,6 +28,8 @@ import { handleMessages, handleCountTokens, validateMessagesRequest, validateCou
 import { handleGemini, parseGeminiPath } from './handlers/gemini.js';
 import { handleResponses } from './handlers/responses.js';
 import { handleModels } from './handlers/models.js';
+import { resolveClineCompat, stripClineNamespace } from './handlers/cline-compat.js';
+import { isExperimentalEnabled } from './runtime-config.js';
 import { resolveModel, getModelInfo } from './models.js';
 import { handleDashboardApi, parseProxyUrl, validateProxyHost, verifyAdminRequest } from './dashboard/api.js';
 import { setAccountProxy } from './dashboard/proxy-config.js';
@@ -203,6 +205,21 @@ async function route(req, res) {
   let path = req.url.split('?')[0];
   // Tolerate a doubled `/v1/v1/` prefix some clients emit.
   if (path.startsWith('/v1/v1/')) path = path.slice(3);
+
+  // Cline compatibility layer resolution (see src/handlers/cline-compat.js).
+  // The dedicated /v1/cline/* namespace is an explicit opt-in that a partner
+  // points Cline at, so it activates the compat shims regardless of the master
+  // toggle; we rewrite it to the canonical /v1/* path so every existing route
+  // match below works unchanged. On the standard path, the shims only engage
+  // when the master experimental.clineCompat toggle is on AND the request looks
+  // like Cline. When inactive, clineCompat.active is false and the whole
+  // pipeline stays byte-identical for every other client.
+  const clineCompat = resolveClineCompat({
+    path,
+    headers: req.headers,
+    masterEnabled: isExperimentalEnabled('clineCompat'),
+  });
+  if (clineCompat.source === 'endpoint') path = stripClineNamespace(path);
 
   if (method === 'OPTIONS' && !path.startsWith('/dashboard/api/')) {
     // Public API (/v1/*) preflight: blanket `*`, no credentials — correct for an
@@ -549,6 +566,7 @@ async function route(req, res) {
       callerKey,
       nativeBridgeCallerKey: nativeBridgeCallerKeyForRequest(req, token, body, callerKey),
       signal: abortController.signal,
+      clineCompat,
     });
     const processingMs = Date.now() - reqStartedAt;
     const requestId = 'req_' + randomUUID();

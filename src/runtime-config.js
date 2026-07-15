@@ -54,6 +54,15 @@ const DEFAULTS = {
     // replies) — the native path also sidesteps the emulation tool-count ceiling
     // that made fable go empty. Flip to false to fall back to prompt emulation.
     nativeToolCall: true,
+    // Cline compatibility layer. When ON, requests DETECTED as Cline (by
+    // User-Agent) hitting the standard /v1 endpoint get the Cline compat shims
+    // (tool-call arguments normalized to parseable JSON so @ai-sdk/openai-
+    // compatible doesn't silently drop parameterless tool calls — vercel/ai#6687).
+    // Default OFF so the standard /v1 path stays byte-identical for every other
+    // client. The dedicated /v1/cline/* namespace applies the shims regardless of
+    // this flag (the namespace itself is the explicit opt-in). See
+    // src/handlers/cline-compat.js.
+    clineCompat: false,
   },
   // v2.0.150 — operator-tunable numeric knobs. Kept out of `experimental`
   // (which coerces everything to boolean). Dashboard-settable.
