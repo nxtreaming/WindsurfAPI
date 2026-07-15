@@ -2801,6 +2801,21 @@ tbody tr:hover td { background: var(--surface-2); }
     <div class="section" style="margin-top:24px">
       <div class="section-header">
         <div>
+          <div class="section-title" data-i18n="section.settings.serviceControl.title">服务控制</div>
+          <div class="section-desc" data-i18n="section.settings.serviceControl.desc">重启网关进程，让需要重启才生效的配置生效或从卡死中恢复。重启期间会先排空在途请求（最多约 10 秒），再由进程守护（systemd / PM2 / docker）自动拉起。</div>
+        </div>
+      </div>
+      <div class="section-body">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button class="btn btn-outline warn" id="btn-restart-service" onclick="App.restartService()" data-i18n="action.restartService">重启服务</button>
+          <span class="text-sm text-muted" id="restart-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top:24px">
+      <div class="section-header">
+        <div>
           <div class="section-title" data-i18n="section.systemPrompts.title">系统提示词</div>
           <div class="section-desc" data-i18n="section.systemPrompts.desc">工具注入、对话模式等内置提示词模板。修改后立即生效，点"重置"恢复默认。</div>
         </div>
@@ -4726,6 +4741,63 @@ docker compose up -d --force-recreate</pre>
     }
   },
 
+  // Restart the whole gateway process (not the LS — that's restartLs). Backend
+  // POST /restart refuses with ERR_NO_SUPERVISOR when nothing would relaunch us;
+  // otherwise it drains in-flight then exits 75 for systemd/PM2/docker to relaunch.
+  async restartService() {
+    const ok = await this.confirm(
+      I18n.t('confirm.restartServiceTitle'),
+      I18n.t('confirm.restartServiceDesc'),
+      { danger: true, okText: I18n.t('action.restartService') },
+    );
+    if (!ok) return;
+    const btn = document.getElementById('btn-restart-service');
+    const status = document.getElementById('restart-status');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await this.api('POST', '/restart');
+      if (!r.ok && r.error === 'ERR_NO_SUPERVISOR') {
+        if (status) status.innerHTML = `<span style="color:var(--warn)">${I18n.t('status.restartNoSupervisor')}</span>`;
+        this.toast(I18n.t('status.restartNoSupervisor'), 'warn');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      // Supervised: process is tearing down. Poll /health until the NEW process
+      // answers (uptime resets / it comes back), then reload.
+      if (status) status.innerHTML = `<span class="text-muted">${I18n.t('status.restarting')}</span>`;
+      this.toast(I18n.t('toast.restartingService'), 'info');
+      const deadline = Date.now() + 60000;
+      const poll = async () => {
+        await new Promise(res => setTimeout(res, 2500));
+        try {
+          const h = await fetch('/health').then(x => x.ok ? x.json() : null).catch(() => null);
+          if (h && Date.now() < deadline) {
+            if (status) status.innerHTML = `<span style="color:var(--success)">${I18n.t('toast.restartSuccess')}</span>`;
+            setTimeout(() => location.reload(), 1200);
+            return;
+          }
+        } catch { /* still down, keep polling */ }
+        if (Date.now() < deadline) return poll();
+        if (status) status.innerHTML = `<span style="color:var(--warn)">${I18n.t('status.restartTimeout')}</span>`;
+        if (btn) btn.disabled = false;
+      };
+      poll();
+    } catch (err) {
+      // The connection dropping mid-restart is EXPECTED (server exited); treat a
+      // fetch failure as "restarting" and poll, not as an error.
+      if (status) status.innerHTML = `<span class="text-muted">${I18n.t('status.restarting')}</span>`;
+      const deadline = Date.now() + 60000;
+      const poll = async () => {
+        await new Promise(res => setTimeout(res, 2500));
+        const h = await fetch('/health').then(x => x.ok ? x.json() : null).catch(() => null);
+        if (h) { setTimeout(() => location.reload(), 1200); return; }
+        if (Date.now() < deadline) return poll();
+        if (btn) btn.disabled = false;
+      };
+      poll();
+    }
+  },
+
   // 6th KPI card: token cache read as a share of total input (fresh + cache_read).
   // Returns '' (no card) when /stats is missing or there is no token usage yet.
   _tokenCacheKpiCard(s) {
@@ -5287,11 +5359,29 @@ void main(){ vec3 s=texture(u_scene,v_uv).rgb; vec3 g=texture(u_glow,v_uv).rgb; 
       + `</div>`;
     const blocked = Number(s.policyBlockedCount) || 0;
     const limited = Number(s.rateLimitedCount) || 0;
+    // v3.4.x — content-policy blocks are captured with a system-prompt sample
+    // (ring buffer, stats.recentPolicyBlocks) so the operator can A/B the
+    // offending prompt when the non-deterministic upstream policy fires. Show a
+    // 5-minute rate + a recent-blocks list under the badge.
+    const ring = Array.isArray(s.recentPolicyBlocks) ? s.recentPolicyBlocks : [];
+    const recent5m = ring.filter(r => r && (Date.now() - (r.ts || 0)) < 300000).length;
+    const blockDetail = ring.length
+      ? `<details style="margin-top:8px"><summary class="text-sm text-muted" style="cursor:pointer">${I18n.t('overview.policyBlocks.recentTitle', { count: ring.length, rate5m: recent5m })}</summary>`
+        + `<div style="margin-top:6px;display:grid;gap:4px;max-height:180px;overflow:auto">`
+        + ring.slice(-20).reverse().map(r => {
+            const t = r.ts ? new Date(r.ts).toLocaleTimeString() : '—';
+            return `<div class="text-sm" style="font-family:monospace;font-size:11px;color:var(--text-muted)">`
+              + `${t} · ${this.esc(r.model || '?')} · #${this.esc(r.promptHash || '?')}`
+              + (r.traceId ? ` · <span title="${this.esc(r.promptSample || '')}">${this.esc(r.traceId)}</span>` : '')
+              + `</div>`;
+          }).join('')
+        + `</div></details>`
+      : '';
     const indicators = (blocked > 0 || limited > 0)
       ? `<div style="margin-top:12px;display:flex;gap:16px;">`
-        + (blocked > 0 ? `<span class="badge stopped">${I18n.t('overview.rankings.policyBlocked', { count: blocked })}</span>` : '')
+        + (blocked > 0 ? `<span class="badge stopped" title="${this.esc(I18n.t('overview.policyBlocks.tip'))}">${I18n.t('overview.rankings.policyBlocked', { count: blocked })}</span>` : '')
         + (limited > 0 ? `<span class="badge">${I18n.t('overview.rankings.rateLimited', { count: limited })}</span>` : '')
-        + `</div>`
+        + `</div>` + blockDetail
       : '';
     el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`
       + col(I18n.t('section.rankings.models'), models, maxM, modelSub)

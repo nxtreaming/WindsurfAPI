@@ -79,6 +79,7 @@
   },
   "action": {
     "checkUpdate": "检查更新",
+    "restartService": "重启服务",
     "applyUpdate": "一键更新并重启",
     "updateLsBinary": "更新 LS",
     "restart": "重启",
@@ -172,6 +173,8 @@
     "noUpdateNeeded": "已是最新，无需更新",
     "updateComplete": "更新完成 {{before}} → {{after}}",
     "restarting": "服务正在后台重启 约 8 秒后自动刷新页面…",
+    "restartNoSupervisor": "未检测到进程守护（systemd / PM2 / docker）——重启已禁用，否则网关退出后不会被拉起。请在守护下运行，或设 WINDSURFAPI_RESTART_SUPERVISED=1。",
+    "restartTimeout": "服务 60 秒内未恢复。请检查进程守护 / 日志。",
     "notGitRepo": "非 git 部署 — 一键更新不可用",
     "notGitRepoHint": "如果你是通过 git clone 部署的，请确保 .git 目录随 WindsurfAPI 源码一起上传",
     "selfUpdateUnavailable": "当前部署方式不支持一键更新",
@@ -218,7 +221,8 @@
       "ux": { "title": "界面偏好", "desc": "跨浏览器/设备共享（存于服务端）" },
       "security": { "title": "安全与锁定", "desc": "登录失败锁定阈值与时长，可调整或关闭" },
       "runtimeEnv": { "title": "运行时后端", "desc": "这些开关由部署时的环境变量控制，改动需重启进程生效；此处仅显示当前运行状态" },
-      "breaker": { "title": "熔断与限流", "desc": "账号错误熔断与自愈退避阈值，可热调；留空回退环境变量/默认值" }
+      "breaker": { "title": "熔断与限流", "desc": "账号错误熔断与自愈退避阈值，可热调；留空回退环境变量/默认值" },
+      "serviceControl": { "title": "服务控制", "desc": "重启网关进程，让需要重启才生效的配置生效或从卡死中恢复。重启期间先排空在途请求（最多约 10 秒），再由进程守护（systemd / PM2 / docker）自动拉起。" }
     },
     "nativeBridge": {
       "title": "Native Bridge",
@@ -831,6 +835,8 @@
     "unsavedDesc": "你有未保存的改动。确定不保存就离开吗？",
     "restartTitle": "重启 Language Server",
     "restartDesc": "进行中的请求将会失败，确定要继续吗？",
+    "restartServiceTitle": "重启网关服务？",
+    "restartServiceDesc": "整个网关进程会重启。先排空在途请求（最多约 10 秒），再由进程守护自动拉起——期间服务短暂不可用。恢复后页面自动刷新。",
     "updateLsTitle": "更新 LS Binary",
     "updateLsDesc": "从 WindsurfAPI / Windsurf 桌面 LS / Exafunction GitHub release 下载最新 language_server 并重启 LS 池。期间正在进行的请求会失败一次。",
     "updateLsButton": "更新",
@@ -1150,6 +1156,8 @@
     "enterEmailFirstName": "请输入邮箱和名字",
     "enterOtpCode": "请输入验证码",
     "restarting": "Language Server 重启中...",
+    "restartingService": "网关重启中…",
+    "restartSuccess": "网关已恢复。",
     "lsBinaryUpdating": "LS 更新中…",
     "lsBinaryUpdated": "LS 二进制已更新（{{before}} → {{after}}），重启 {{count}} 个实例",
     "lsBinaryUpdatedColdPool": "LS 二进制已更新（{{before}} → {{after}}），暂无运行中实例，下次请求时自动加载",
@@ -1421,6 +1429,10 @@
       "policyBlocked": "策略拦截：{{count}}",
       "rateLimited": "限流：{{count}}",
       "empty": "暂无排行数据"
+    },
+    "policyBlocks": {
+      "tip": "上游内容策略拦截。该策略非确定性——展开看近期样本以便对被拦 prompt 做 A/B。",
+      "recentTitle": "近期内容策略拦截：已捕获 {{count}} 条 · 最近 5 分钟 {{rate5m}} 条"
     },
     "trend": {
       "requests": "请求",

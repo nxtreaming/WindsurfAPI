@@ -79,6 +79,7 @@
   },
   "action": {
     "checkUpdate": "Check Update",
+    "restartService": "Restart Service",
     "applyUpdate": "Update & Restart",
     "updateLsBinary": "Update LS",
     "restart": "Restart",
@@ -172,6 +173,8 @@
     "noUpdateNeeded": "Already up to date, no update needed",
     "updateComplete": "Update complete {{before}} → {{after}}",
     "restarting": "Service restarting in background, page will auto-refresh in ~8 seconds...",
+    "restartNoSupervisor": "No process supervisor (systemd / PM2 / docker) detected — restart is disabled because the gateway would not relaunch. Run under a supervisor or set WINDSURFAPI_RESTART_SUPERVISED=1.",
+    "restartTimeout": "Service did not come back within 60s. Check the supervisor / logs.",
     "notGitRepo": "Not a git repository",
     "notGitRepoHint": "Ensure .git directory is present for one-click updates",
     "selfUpdateUnavailable": "One-click update is unavailable in this deployment",
@@ -218,7 +221,8 @@
       "ux": { "title": "Interface Preferences", "desc": "Shared across browsers / devices (stored on the server)" },
       "security": { "title": "Security & Lockout", "desc": "Login-failure lockout thresholds and durations — adjustable or off" },
       "runtimeEnv": { "title": "Runtime Backend", "desc": "These switches are set by deploy-time environment variables and need a process restart to change; shown here as read-only status" },
-      "breaker": { "title": "Circuit Breaker & Rate Limiting", "desc": "Per-account error breaker + self-healing backoff thresholds. Hot-editable; blank follows the env var / default." }
+      "breaker": { "title": "Circuit Breaker & Rate Limiting", "desc": "Per-account error breaker + self-healing backoff thresholds. Hot-editable; blank follows the env var / default." },
+      "serviceControl": { "title": "Service Control", "desc": "Restart the gateway process to apply restart-only config changes or recover from a stuck state. In-flight requests are drained first (up to ~10s), then the process supervisor (systemd / PM2 / docker) relaunches it." }
     },
     "nativeBridge": {
       "title": "Native Bridge",
@@ -831,6 +835,8 @@
     "unsavedDesc": "You have unsaved changes. Leave without saving?",
     "restartTitle": "Restart Language Server",
     "restartDesc": "In-progress requests will fail. Continue?",
+    "restartServiceTitle": "Restart the gateway service?",
+    "restartServiceDesc": "The whole gateway process will restart. In-flight requests are drained first (up to ~10s), then the supervisor relaunches it — the service is briefly unavailable. The page auto-refreshes when it's back.",
     "updateLsTitle": "Update LS Binary",
     "updateLsDesc": "Download the latest language_server from the WindsurfAPI / Windsurf desktop LS / Exafunction GitHub release and restart the LS pool. In-flight requests will fail once.",
     "updateLsButton": "Update",
@@ -1150,6 +1156,8 @@
     "enterEmailFirstName": "Please enter email and first name",
     "enterOtpCode": "Please enter the verification code",
     "restarting": "Language Server restarting...",
+    "restartingService": "Gateway restarting…",
+    "restartSuccess": "Gateway is back up.",
     "lsBinaryUpdating": "Updating LS binary…",
     "lsBinaryUpdated": "LS binary updated ({{before}} → {{after}}), restarted {{count}} instance(s)",
     "lsBinaryUpdatedColdPool": "LS binary updated ({{before}} → {{after}}), no running instances; new binary loads on next request",
@@ -1421,6 +1429,10 @@
       "policyBlocked": "Policy blocked: {{count}}",
       "rateLimited": "Rate limited: {{count}}",
       "empty": "No ranking data"
+    },
+    "policyBlocks": {
+      "tip": "Upstream content-policy rejections. The policy is non-deterministic — expand for recent samples to A/B the offending prompt.",
+      "recentTitle": "Recent content-policy blocks: {{count}} captured · {{rate5m}} in last 5 min"
     },
     "trend": {
       "requests": "Requests",
