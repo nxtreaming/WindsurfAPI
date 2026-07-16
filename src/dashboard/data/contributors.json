@@ -344,6 +344,7 @@
     },
     {
       "login": "warelik",
+      "githubId": 54947489,
       "pr": 216,
       "weight": "S",
       "weightLabel": "MCP-gate 中和 + native 工具 preamble · 工具链路能不能用的分水岭",
@@ -353,6 +354,7 @@
     },
     {
       "login": "warelik",
+      "githubId": 54947489,
       "pr": 215,
       "weight": "A",
       "weightLabel": "IPv6 Happy Eyeballs ETIMEDOUT 根因修复 · 网络层",
