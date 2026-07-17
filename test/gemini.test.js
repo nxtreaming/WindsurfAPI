@@ -107,6 +107,46 @@ describe('geminiToOpenAI request translation', () => {
     assert.deepEqual(JSON.parse(toolMsg.content), { temp: 20 });
   });
 
+  it('FIFO-pairs parallel same-name functionResponses to distinct calls (no orphan / dup id)', () => {
+    // Two parallel `search` calls in one model turn, then two responses. The old
+    // "last id per name" Map routed BOTH responses to the second call → orphaned
+    // the first call and duplicated a tool_call_id. FIFO must pair in issue order.
+    const out = geminiToOpenAI({
+      contents: [
+        { role: 'model', parts: [
+          { functionCall: { name: 'search', args: { q: 'A' } } },
+          { functionCall: { name: 'search', args: { q: 'B' } } },
+        ] },
+        { role: 'user', parts: [
+          { functionResponse: { name: 'search', response: { r: 'respA' } } },
+          { functionResponse: { name: 'search', response: { r: 'respB' } } },
+        ] },
+      ],
+    });
+    const asst = out.messages.find(m => m.role === 'assistant' && m.tool_calls);
+    const ids = asst.tool_calls.map(t => t.id);
+    assert.equal(new Set(ids).size, 2, 'two distinct call ids');
+    const toolMsgs = out.messages.filter(m => m.role === 'tool');
+    assert.equal(toolMsgs.length, 2);
+    // First response pairs to first call, second to second (FIFO).
+    assert.equal(toolMsgs[0].tool_call_id, ids[0]);
+    assert.equal(toolMsgs[1].tool_call_id, ids[1]);
+    assert.notEqual(toolMsgs[0].tool_call_id, toolMsgs[1].tool_call_id, 'no duplicate tool_call_id');
+  });
+
+  it('prefers Gemini native functionCall.id / functionResponse.id when present', () => {
+    const out = geminiToOpenAI({
+      contents: [
+        { role: 'model', parts: [{ functionCall: { id: 'g_native_1', name: 'search', args: { q: 'x' } } }] },
+        { role: 'user', parts: [{ functionResponse: { id: 'g_native_1', name: 'search', response: { r: 'ok' } } }] },
+      ],
+    });
+    const asst = out.messages.find(m => m.role === 'assistant' && m.tool_calls);
+    assert.equal(asst.tool_calls[0].id, 'g_native_1', 'uses native id verbatim');
+    const toolMsg = out.messages.find(m => m.role === 'tool');
+    assert.equal(toolMsg.tool_call_id, 'g_native_1', 'response pairs via native id');
+  });
+
   it('maps functionDeclarations to OpenAI tools and drops server-side tools', () => {
     const out = geminiToOpenAI({
       contents: [{ role: 'user', parts: [{ text: 'x' }] }],

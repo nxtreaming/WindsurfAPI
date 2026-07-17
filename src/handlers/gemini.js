@@ -61,8 +61,9 @@ function mapGeminiToolChoice(toolConfig) {
 
 // Build a stable tool_call id from a Gemini functionCall. Gemini matches a
 // functionResponse to its call by NAME (no id field on the wire), so we mint
-// deterministic ids and track the most recent id per name to wire the
-// matching tool result back to the right call.
+// deterministic ids and pair each functionResponse to its functionCall. Gemini
+// wire has no per-call id historically, so we mint one and FIFO-match by name;
+// modern v1beta parts may carry an explicit `id`, which we prefer when present.
 function callIdFor(name, seq) {
   return `call_${(name || 'fn').replace(/[^a-zA-Z0-9_]/g, '_')}_${seq}`;
 }
@@ -75,9 +76,12 @@ export function geminiToOpenAI(body, modelFromPath) {
   const sysText = extractText(body?.systemInstruction);
   if (sysText) messages.push({ role: 'system', content: sysText });
 
-  // Track the latest synthesized id for each function name so a later
-  // functionResponse part can reference the correct tool_call_id.
-  const lastIdByName = new Map();
+  // FIFO queue of synthesized ids per function name so a later functionResponse
+  // pairs to the correct functionCall — even when the same function is called
+  // multiple times in parallel in one turn (the old "last id per name" Map
+  // misrouted every same-name response to the FINAL call, orphaning the earlier
+  // ones and duplicating a tool_call_id → upstream 400 / mis-fed tool results).
+  const pendingIdsByName = new Map();
   let callSeq = 0;
 
   for (const c of (body?.contents || [])) {
@@ -119,8 +123,13 @@ export function geminiToOpenAI(body, modelFromPath) {
         });
       } else if (part.functionCall) {
         const name = part.functionCall.name || 'unknown';
-        const id = callIdFor(name, callSeq++);
-        lastIdByName.set(name, id);
+        // Prefer Gemini's own call id when present (v1beta parallel calls carry
+        // one); otherwise mint a deterministic one and enqueue it for FIFO pairing.
+        const id = part.functionCall.id || callIdFor(name, callSeq++);
+        if (!part.functionCall.id) {
+          if (!pendingIdsByName.has(name)) pendingIdsByName.set(name, []);
+          pendingIdsByName.get(name).push(id);
+        }
         toolCalls.push({
           id,
           type: 'function',
@@ -128,7 +137,11 @@ export function geminiToOpenAI(body, modelFromPath) {
         });
       } else if (part.functionResponse) {
         const name = part.functionResponse.name || 'unknown';
-        const id = lastIdByName.get(name) || callIdFor(name, 0);
+        // Prefer the response's own id; else dequeue the oldest unmatched call of
+        // this name (FIFO) so parallel same-name calls pair in issue order.
+        const queue = pendingIdsByName.get(name);
+        const id = part.functionResponse.id
+          || (queue && queue.length ? queue.shift() : callIdFor(name, 0));
         const resp = part.functionResponse.response;
         const content = typeof resp === 'string' ? resp : JSON.stringify(resp ?? {});
         functionResponses.push({ role: 'tool', tool_call_id: id, content });
